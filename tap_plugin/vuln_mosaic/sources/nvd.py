@@ -62,18 +62,21 @@ def _query(ctx: RunContext, throttle: _Throttle, params: dict[str, str], sleep: 
     raise FetchError("NVD kept refusing after backoff")  # pragma: no cover
 
 
-def _store(store: RecordStore, items: list[dict], wanted: set[str] | None) -> tuple[int, int]:
+def _store(store: RecordStore, items: list[dict], wanted: set[str] | None, requested: str | None = None) -> tuple[int, int]:
+    """Verify and store NVD objects. For a by-id request (``requested``) every object must be that
+    id: a foreign answer is quarantined, never silently skipped. For a window query (``wanted``) objects
+    outside the held/wanted set are simply not ours and are skipped."""
     stored = bad = 0
     with store.transaction():
         for item in items:
             cve_id = (item.get("cve") or {}).get("id")
-            if wanted is not None and cve_id not in wanted:
+            if requested is None and wanted is not None and cve_id not in wanted:
                 continue
             raw = json.dumps(item, sort_keys=True).encode()
             try:
-                checked = check_nvd_object(raw, str(cve_id))
+                checked = check_nvd_object(raw, requested or str(cve_id))
             except IntegrityError as exc:
-                store.quarantine(str(cve_id), str(exc))
+                store.quarantine(requested or str(cve_id), str(exc))
                 bad += 1
                 continue
             store.put(cve_id, checked.state, checked.date_updated, raw)
@@ -97,7 +100,10 @@ def refresh(ctx: RunContext, store: RecordStore, sleep: Callable[[float], None] 
     stored = bad = 0
     for cve_id in sorted(wanted - held):
         data = _query(ctx, throttle, {"cveId": validate_cve_id(cve_id)}, sleep)
-        s, b = _store(store, data.get("vulnerabilities", []), {cve_id})
+        items = data.get("vulnerabilities", [])
+        s, b = _store(store, items, None, requested=cve_id)
+        if not items:
+            outcome.counts["absent_upstream"] = outcome.counts.get("absent_upstream", 0) + 1
         stored, bad = stored + s, bad + b
     last_end = store.get_meta("last_mod_end")
     if last_end and held:

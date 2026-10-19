@@ -246,4 +246,4 @@ def test_nvd_quarantines_a_foreign_id(home, clock) -> None:
     with RecordStore.open_writer(home, "nvd") as store:
         out = nvd.refresh(ctx, store, sleep=lambda s: None)
         assert store.count() == 0
-    assert out.counts["stored"] == 0
+    assert out.counts["stored"] == 0 and out.counts["quarantined"] == 1 and not out.ok

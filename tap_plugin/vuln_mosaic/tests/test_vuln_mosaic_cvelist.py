@@ -155,7 +155,7 @@ def test_unchanged_fetch_advances_checked_at_only(home, upstream, clock) -> None
 
 def test_git_subprocess_hygiene(home, upstream, clock) -> None:  # cvelist-5
     seen = []
-    real = __import__("subprocess").run
+    real = __import__("subprocess").Popen
 
     def spy(command, **kwargs):  # type: ignore[no-untyped-def]
         seen.append((command, kwargs))
@@ -163,7 +163,7 @@ def test_git_subprocess_hygiene(home, upstream, clock) -> None:  # cvelist-5
 
     seed(upstream)
     want(home, PUBLISHED_SSVC)
-    with mock.patch("subprocess.run", spy):
+    with mock.patch("subprocess.Popen", spy):
         run(home, upstream, clock)
     assert seen
     for command, kwargs in seen:
@@ -171,9 +171,19 @@ def test_git_subprocess_hygiene(home, upstream, clock) -> None:  # cvelist-5
         env = kwargs["env"]
         assert env["GIT_TERMINAL_PROMPT"] == "0" and env["GIT_ALLOW_PROTOCOL"] == "file"
         assert env["GIT_CONFIG_NOSYSTEM"] == "1" and env["HOME"].startswith(str(home))
-        assert kwargs.get("timeout")
         if command[0] == "git" and "-C" in command:
             assert "transfer.fsckObjects=true" in command and "core.hooksPath=/dev/null" in command
+
+
+def test_git_timeout_is_set_and_stderr_is_capped(home) -> None:
+    git = Git(home / "g.git", home)
+    assert git._timeout > 0 and git._max_output > 0
+    from tap_plugin.vuln_mosaic import gitops
+
+    code = "import sys; sys.stderr.write('x' * (gitops_cap + 10)); sys.stderr.flush()"
+    code = code.replace("gitops_cap", str(gitops.STDERR_CAP))
+    _, _, err, outcome = gitops._run_bounded(["python3", "-c", code], None, {"PATH": "/usr/bin:/bin"}, 30, 10**9)
+    assert outcome == "overflow" and len(err) < gitops.STDERR_CAP + 70000
 
 
 def test_git_output_cap_and_timeout(home, upstream) -> None:
@@ -205,3 +215,24 @@ def test_record_path_shape() -> None:
     assert record_path("CVE-2021-44228") == "cves/2021/44xxx/CVE-2021-44228.json"
     assert record_path("CVE-2022-0001") == "cves/2022/0xxx/CVE-2022-0001.json"
     assert request_id  # imported for the lookup tests
+
+
+def test_quarantined_record_is_retried_and_never_reads_fresh(home, upstream, clock) -> None:  # review: no silent acknowledge
+    from datetime import UTC, datetime
+
+    seed(upstream)
+    want(home, PUBLISHED_SSVC)
+    run(home, upstream, clock)
+    before = fetch_record(home, "cvelist", PUBLISHED_SSVC)[1]
+    broken = json.loads(corpus(PUBLISHED_SSVC))
+    broken["dataType"] = "SOMETHING_ELSE"
+    upstream.commit(upstream.put_record(PUBLISHED_SSVC, json.dumps(broken).encode()))
+    later = lambda: datetime(2026, 10, 25, 12, 0, tzinfo=UTC)  # noqa: E731
+    first = run(home, upstream, later)
+    second = run(home, upstream, later)  # same tip again: the failure must repeat, not be acknowledged
+    assert not first.ok and not second.ok
+    after = fetch_record(home, "cvelist", PUBLISHED_SSVC)[1]
+    assert after.checked_at == before.checked_at and second.stale is True
+    with RecordStore.open_writer(home, "cvelist") as store:
+        assert len(store.quarantined()) == 1  # one row per (id, reason)
+    assert held(home)[PUBLISHED_SSVC] == corpus(PUBLISHED_SSVC)

@@ -123,18 +123,23 @@ def refresh(ctx: RunContext, store: RecordStore) -> SourceOutcome:
     with store.transaction():
         for cve_id in to_delete:
             store.delete(cve_id)
-        store.set_facts(
-            as_of=git.commit_time(tip),
-            checked_at=built or now,
-            source_version=tip,
-            fetched_at=now,
-        )
-    git.mark_applied(tip)
+        if not bad:
+            # A quarantined record is an unresolved failure, not a disposition: the facts stay where
+            # they were (so the dataset ages toward stale) and the applied ref does not advance, so
+            # the next run sees the same diff and tries again.
+            store.set_facts(
+                as_of=git.commit_time(tip),
+                checked_at=built or now,
+                source_version=tip,
+                fetched_at=now,
+            )
+    if not bad:
+        git.mark_applied(tip)
     if full or last is not None:
         _housekeeping(git, stored)
 
     outcome.counts.update(stored=stored, quarantined=bad, deleted=len(to_delete), ignored_paths=ignored)
-    outcome.source_version = tip
+    outcome.source_version = tip if not bad else store.facts().source_version
     outcome.facts = store.facts()
     outcome.stale = is_stale(outcome.facts.checked_at, cfg.max_age_days, ctx.now())
     if bad:

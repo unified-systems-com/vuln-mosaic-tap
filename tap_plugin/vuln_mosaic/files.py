@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 from dataclasses import asdict
 from pathlib import Path
@@ -12,6 +13,7 @@ from typing import BinaryIO
 from tap_plugin.vuln_mosaic.staleness import DatasetFacts
 
 KEEP_BUILDS = 2
+_BUILD_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 def source_dir(home: Path, source: str) -> Path:
@@ -53,6 +55,9 @@ def current_build(home: Path, source: str) -> str | None:
 
 def publish(home: Path, source: str, build: str, staging: Path, facts: DatasetFacts) -> Path:
     """Move a validated staging directory into ``<build>`` and atomically repoint ``current``."""
+    if not _BUILD_RE.fullmatch(build):
+        shutil.rmtree(staging, ignore_errors=True)
+        raise ValueError(f"unsafe build name {build!r}")
     root = source_dir(home, source)
     target = root / build
     if target.exists():

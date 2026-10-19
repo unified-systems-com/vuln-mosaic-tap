@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,6 +25,71 @@ _BATCH = 200
 
 class GitError(RuntimeError):
     """A git call failed, timed out or produced too much output."""
+
+
+STDERR_CAP = 1024 * 1024
+
+
+def _run_bounded(
+    command: list[str], stdin: bytes | None, env: dict[str, str], timeout: float, max_output: int
+) -> tuple[int, bytes, bytes, str]:
+    """Run a command, reading both streams as they arrive and killing it past a cap or deadline.
+
+    ``subprocess.run(capture_output=True)`` buffers without limit and checks afterwards; this stops
+    the process the moment a stream passes its cap, so memory stays bounded by the cap.
+    Returns (returncode, stdout, stderr, outcome) with outcome one of ok, timeout, overflow.
+    """
+    proc = subprocess.Popen(  # noqa: S603 - argument list, no shell
+        command,
+        stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+    )
+    buffers = {"out": bytearray(), "err": bytearray()}
+    over = threading.Event()
+
+    def pump(stream, key: str, cap: int) -> None:  # type: ignore[no-untyped-def]
+        buf = buffers[key]
+        while chunk := stream.read(65536):
+            buf.extend(chunk)
+            if len(buf) > cap:
+                over.set()
+                proc.kill()
+                return
+
+    def feed() -> None:
+        try:
+            assert proc.stdin is not None and stdin is not None
+            proc.stdin.write(stdin)
+        except (BrokenPipeError, OSError):
+            pass
+        finally:
+            try:
+                proc.stdin.close()  # type: ignore[union-attr]
+            except OSError:
+                pass
+
+    threads = [
+        threading.Thread(target=pump, args=(proc.stdout, "out", max_output), daemon=True),
+        threading.Thread(target=pump, args=(proc.stderr, "err", STDERR_CAP), daemon=True),
+    ]
+    if stdin is not None:
+        threads.append(threading.Thread(target=feed, daemon=True))
+    for t in threads:
+        t.start()
+    outcome = "ok"
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        outcome = "timeout"
+    for t in threads:
+        t.join(timeout=5)
+    proc.wait()
+    if over.is_set():
+        outcome = "overflow"
+    return proc.returncode, bytes(buffers["out"]), bytes(buffers["err"]), outcome
 
 
 @dataclass(frozen=True)
@@ -71,17 +137,15 @@ class Git:
             "-C", str(self.repo),
             *args,
         ]
-        try:
-            done = subprocess.run(  # noqa: S603 - argument list, no shell
-                command, input=stdin, capture_output=True, env=self._env(), timeout=self._timeout, check=False
-            )
-        except subprocess.TimeoutExpired:
-            raise GitError(f"git {args[0]} timed out after {self._timeout:.0f}s") from None
-        if len(done.stdout) > self._max_output:
-            raise GitError(f"git {args[0]} output exceeded {self._max_output} bytes")
-        if check and done.returncode != 0:
-            raise GitError(f"git {" ".join(args[:3])} failed ({done.returncode}): {done.stderr.decode(errors='replace')[-400:]}")
-        return done.stdout
+        label = " ".join(args[:3])
+        code, out, err, outcome = _run_bounded(command, stdin, self._env(), self._timeout, self._max_output)
+        if outcome == "timeout":
+            raise GitError(f"git {label} timed out after {self._timeout:.0f}s")
+        if outcome == "overflow":
+            raise GitError(f"git {label} output exceeded {self._max_output} bytes")
+        if check and code != 0:
+            raise GitError(f"git {label} failed ({code}): {err.decode(errors='replace')[-400:]}")
+        return out
 
     # repository
     def ensure_repo(self, *, blobless: bool = True) -> None:

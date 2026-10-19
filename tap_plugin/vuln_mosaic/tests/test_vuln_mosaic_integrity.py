@@ -190,3 +190,18 @@ def test_body_cap_and_truncation(tmp_path: Path) -> None:  # integrity-2
         http_error.get_bytes(url, max_bytes=10)
     assert exc.value.status == 503
     assert isinstance(urllib.error.HTTPError, type)
+
+
+def test_kev_catalog_version_cannot_become_a_path() -> None:  # review: first-install path injection
+    for evil in ("/../../../../tmp/x", "1.2/../3", "v1", "1.2.x"):
+        with pytest.raises(integrity.IntegrityError):
+            integrity.check_kev(kev(version=evil), None, NOW)
+
+
+def test_publish_refuses_unsafe_build_names(tmp_path: Path) -> None:
+    from tap_plugin.vuln_mosaic import files
+    from tap_plugin.vuln_mosaic.staleness import DatasetFacts
+
+    staging = files.new_staging(tmp_path, "kev", "x")
+    with pytest.raises(ValueError):
+        files.publish(tmp_path, "kev", "../escape", staging, DatasetFacts())

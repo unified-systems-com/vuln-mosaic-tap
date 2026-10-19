@@ -156,8 +156,11 @@ class RecordStore:
 
     # quarantine
     def quarantine(self, cve_id: str, reason: str) -> None:
+        """Record a refusal once per (id, reason): a retried failure does not grow the table."""
         self._conn.execute(
-            "INSERT INTO quarantine(id, seen_at, reason) VALUES(?,?,?)", (cve_id, to_iso(utcnow()), reason)
+            "INSERT INTO quarantine(id, seen_at, reason) SELECT ?,?,? "
+            "WHERE NOT EXISTS (SELECT 1 FROM quarantine WHERE id = ? AND reason = ?)",
+            (cve_id, to_iso(utcnow()), reason, cve_id, reason),
         )
 
     def quarantined(self) -> list[tuple[str, str]]:

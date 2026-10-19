@@ -167,9 +167,10 @@ def test_git_links_only_the_system_openssl() -> None:  # fips-2 (git half; the c
     for binary in [helper]:
         libs |= set(re.findall(rb"lib[A-Za-z0-9_+-]+\.so[0-9.]*", binary.read_bytes()))
     curl = next((p for d in ("/usr/lib", "/usr/lib64", "/lib") for p in Path(d).glob("libcurl.so*") if p.is_file()), None)
-    if curl is not None:
-        libs |= set(re.findall(rb"lib[A-Za-z0-9_+-]+\.so[0-9.]*", curl.read_bytes()))
+    if curl is None:
+        pytest.skip("libcurl not found; the TLS library cannot be inspected here")
+    libs |= set(re.findall(rb"lib[A-Za-z0-9_+-]+\.so[0-9.]*", curl.read_bytes()))
     names = b" ".join(sorted(libs))
-    assert b"libssl" in names or b"libcrypto" in names or curl is None, names
+    assert b"libssl" in names or b"libcrypto" in names, names
     for foreign in (b"gnutls", b"mbedtls", b"libnss", b"wolfssl", b"boringssl"):
         assert foreign not in names, foreign

@@ -121,7 +121,8 @@ def check_kev(raw: bytes, installed_version: str | None, now: datetime | None = 
         cve_id = entry.get("cveID") if isinstance(entry, dict) else None
         if not isinstance(cve_id, str) or not CVE_ID_RE.fullmatch(cve_id):
             raise IntegrityError(f"catalog entry has a bad cveID {cve_id!r}")
-    if installed_version is not None and version_tuple(str(version)) < version_tuple(installed_version):
+    incoming = version_tuple(str(version))  # dotted integers only: the value later becomes a directory name
+    if installed_version is not None and incoming < version_tuple(installed_version):
         raise IntegrityError(f"catalogVersion {version} is lower than installed {installed_version}")
     released_at = parse_time(str(released))
     if released_at is None or released_at > (now or utcnow()):
