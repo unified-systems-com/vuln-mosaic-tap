@@ -163,6 +163,23 @@ def test_not_fetched_shows_a_placeholder_and_queues(vm_home) -> None:
     assert "Record not fetched" in html
 
 
+def test_queue_misses_false_is_purely_read_only(vm_home) -> None:
+    ctx, html = render("vuln_id=CVE-2022-7778", {"queue_misses": False})
+    assert ctx["record_state"] == "not-fetched" and ctx["queued"] is False
+    assert "Queued for the next refresh" not in html and "Not observed" in html
+    assert not (vm_home / "spool").exists()
+
+
+def test_spool_is_bounded(vm_home, monkeypatch) -> None:
+    from tap_plugin.vuln_mosaic import wanted
+
+    monkeypatch.setattr(wanted, "MAX_SPOOL", 2)
+    for n in range(5):
+        lookup.get_cve(f"CVE-2022-90{n:02d}", home=vm_home)
+    assert len(list((vm_home / "spool").iterdir())) == 2
+    assert lookup.get_cve("CVE-2022-9099", home=vm_home).state == "not-fetched"
+
+
 def test_ghsa_only_renders_a_note_without_touching_the_cve_datasets(vm_home, monkeypatch) -> None:
     import tap_plugin.vuln_mosaic.panels.cve as mod
 

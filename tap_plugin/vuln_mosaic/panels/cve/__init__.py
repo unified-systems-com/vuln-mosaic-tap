@@ -55,6 +55,13 @@ CVE_PANEL_CONFIG_SCHEMA: dict[str, Any] = {
             "description": "True hides the panel header bar.",
             "type": "boolean",
         },
+        "queue_misses": {
+            "description": (
+                "True (the default) queues an id the stores do not hold for the next refresh, which writes one "
+                "small file per distinct id (bounded). False makes the panel purely read-only."
+            ),
+            "type": "boolean",
+        },
         "max_references_per_tag": {
             "description": "How many reference links to list under each tag before the rest are counted. Default 8.",
             "type": "integer",
@@ -220,20 +227,24 @@ class VulnMosaicCvePanelType:
             return {**context, "state": "ghsa_only"}
         if kind == "other":
             return {**context, "state": "unrecognised"}
-        return {**context, "state": "cve", **cls._cve_sections(requested, int(config.get("max_references_per_tag") or 8))}
+        return {
+            **context,
+            "state": "cve",
+            **cls._cve_sections(requested, int(config.get("max_references_per_tag") or 8), config.get("queue_misses", True)),
+        }
 
     @classmethod
-    def _cve_sections(cls, cve_id: str, per_tag: int) -> dict[str, Any]:
+    def _cve_sections(cls, cve_id: str, per_tag: int, queue: bool = True) -> dict[str, Any]:
         out: dict[str, Any] = {"datasets": []}
         try:
-            record = get_cve(cve_id)
+            record = get_cve(cve_id, queue=queue)
         except Exception:  # a failed read must not take the page down
             logger.exception("[a5d7] vuln_mosaic get_cve failed for %s", cve_id)
             record = None
         out["record_state"] = record.state if record else "error"
         if record is not None:
             out["datasets"].append(dataset_row("CVE record", record.dataset))
-            out["queued"] = record.state == "not-fetched"
+            out["queued"] = record.state == "not-fetched" and queue
             if record.state == "found" and record.record is not None:
                 parsed = extract_record(record.record)
                 ssvc = parsed.ssvc

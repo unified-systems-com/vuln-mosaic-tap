@@ -493,7 +493,7 @@ One panel type, `vuln-mosaic-cve`, shows what the local datasets hold about one 
 
 `tap_plugin/vuln_mosaic/panels/cve/__init__.py` defines `VulnMosaicCvePanelType` (slug `vuln-mosaic-cve`, view `vuln_mosaic/panels/cve.html`, css `vuln_mosaic/css/cve.css`), registered in `apps.py` `ready()` on `tap_web.registry.panel_type_registry`. The page forwards its query parameters to the panel request (*observed* 2026-10-19: the page's `hx-get` carries `?vuln_id=…`), and the panel reads the one named by the config key `vuln_id_var` (default `vuln_id`).
 
-Config (`CVE_PANEL_CONFIG_SCHEMA`, every property described, unknown keys refused): `vuln_id_var` (string), `hide_header` (boolean), `max_references_per_tag` (integer, default 8). An instance is a `panel` node whose `view` is `vuln_mosaic/panels/cve.html` and whose `config` is that object.
+Config (`CVE_PANEL_CONFIG_SCHEMA`, every property described, unknown keys refused): `vuln_id_var` (string), `hide_header` (boolean), `queue_misses` (boolean, default true: a request for an id the stores do not hold queues it for the next refresh, which is a write on a read, so it is bounded to 5,000 spool entries and can be turned off), `max_references_per_tag` (integer, default 8). An instance is a `panel` node whose `view` is `vuln_mosaic/panels/cve.html` and whose `config` is that object.
 
 The panel calls `get_cve`, `get_kev` and `get_epss` inside the request. The stores are local files, so the request path makes no network call (the module imports no HTTP, socket or subprocess module). Sections, all structured and without generated prose: record state and outside links; CISA KEV (listed, dateAdded, dueDate, ransomware flag, requiredAction as given); EPSS (score, percentile, model version, score date); record (published, updated, CWE); SSVC; CVSS from the CNA and CISA-ADP containers with the vector split into metric chips; affected products with `fixed_versions` only; references grouped by tag; and a dataset table (as of, checked, version, freshness). Colours are the stat-card tokens (red for KEV and critical/high, yellow for medium and stale, grey for zero, low, not listed and unobserved), with the same dark-mode selectors, and a tone is always paired with a word.
 
@@ -510,6 +510,7 @@ States: no id selected; invalid config; a CVE id (record found, rejected, or not
 | req-vuln-mosaic-panel-cve-5 | Only Range Ends As Fixes | Implemented | `unaffected_versions` never appear in the output; `fixed_versions` do. | |
 | req-vuln-mosaic-panel-cve-6 | Hostile Record Text | Implemented | A `javascript:` reference is not linked and record-supplied markup is escaped. | |
 | req-vuln-mosaic-panel-cve-7 | Theme Aware | Implemented | The stylesheet defines the panel's tokens for light, for dark by preference and for `data-theme="dark"`, with the stat-card values. | |
+| req-vuln-mosaic-panel-cve-8 | Queue Bounded And Optional | Implemented | With `queue_misses` false a miss writes nothing; with it true the spool never grows past its bound. | |
 
 ### Operator Commands
 

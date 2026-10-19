@@ -47,8 +47,11 @@ def _max_age(home: Path) -> int:
         return 3
 
 
-def get_cve(cve_id: str, *, home: Path | None = None) -> LookupResult:
-    """Return found, rejected or not-fetched. Raises ``ValueError`` for a malformed id before any I/O."""
+def get_cve(cve_id: str, *, home: Path | None = None, queue: bool = True) -> LookupResult:
+    """Return found, rejected or not-fetched. Raises ``ValueError`` for a malformed id before any I/O.
+
+    ``queue=False`` makes a miss a pure read: nothing is written and the immediate fetch is not tried.
+    """
     validate_cve_id(cve_id)
     root = resolve_home(home)
     age = _max_age(root)
@@ -58,8 +61,10 @@ def get_cve(cve_id: str, *, home: Path | None = None) -> LookupResult:
         if stored.state == "REJECTED":
             return LookupResult(REJECTED, None, dataset)
         return LookupResult(FOUND, json.loads(stored.raw), dataset)
-    request_id(root, cve_id)
-    reason = "queued for the next refresh"
+    if not queue:
+        return LookupResult(NOT_FETCHED, None, _info(facts, age), "not held; not queued")
+    queued = request_id(root, cve_id)
+    reason = "queued for the next refresh" if queued else "already queued, or the queue is full"
     try:
         settings = load_settings(root)
     except SettingsError as exc:

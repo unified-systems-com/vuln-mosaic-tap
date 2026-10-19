@@ -70,11 +70,25 @@ def scan_wanted_files(home: Path) -> WantedScan:
     return scan
 
 
+MAX_SPOOL = 5000
+
+
 def request_id(home: Path, cve_id: str) -> bool:
-    """Queue an id for the next refresh. ``O_EXCL`` makes concurrent requests one file."""
+    """Queue an id for the next refresh. ``O_EXCL`` makes concurrent requests one file.
+
+    The spool is bounded (``MAX_SPOOL`` entries): a read-triggered write must not let a viewer grow
+    the directory, or the next refresh's fetch set, without limit. At the cap nothing is created and
+    ``False`` is returned; the id is simply not queued.
+    """
     validate_cve_id(cve_id)
     spool = home / "spool"
     spool.mkdir(parents=True, exist_ok=True)
+    try:
+        queued = sum(1 for _ in os.scandir(spool))
+    except OSError:
+        queued = 0
+    if queued >= MAX_SPOOL:
+        return False
     try:
         fd = os.open(spool / cve_id, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
     except FileExistsError:
