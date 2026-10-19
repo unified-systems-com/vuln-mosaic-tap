@@ -1,0 +1,41 @@
+# TAP vuln_mosaic plugin — package-mode distribution (standalone from the first commit).
+#
+# Identity chain (pre-boot conformance gate enforces agreement):
+#   slug             = "vuln_mosaic"
+#   distribution     = "vuln-mosaic-tap"            (the -tap convention)
+#   import namespace = "tap_plugin.vuln_mosaic"     (PEP 420 — no tap_plugin/__init__.py)
+#   entry-point key  = "vuln_mosaic"                (== slug)
+#
+# Spec: specs/spec-vuln-mosaic-v0.md. The runtime is the standard library only: git is a
+# subprocess, SQLite and HTTPS come from the interpreter (req-vuln-mosaic-records-4).
+[project]
+name = "vuln-mosaic-tap"
+description = "TAP Vuln Mosaic plugin — local copies of public vulnerability data (CVE records, KEV, EPSS, NVD, OSV)."
+requires-python = ">=3.14"
+dynamic = ["version"]
+dependencies = []
+
+[project.entry-points."tap.plugins"]
+vuln_mosaic = "tap_plugin.vuln_mosaic.apps:VulnMosaicConfig"
+
+# The plugin's OWN dev closure (PEP 735); never installed by boot, never in the wheel.
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-django>=4.9",
+    "factory-boy>=3.3",
+]
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.version.raw-options]
+fallback_version = "0.0.0"
+
+# PEP 420 namespace build: ship tap_plugin/vuln_mosaic/* with no tap_plugin/__init__.py.
+[tool.hatch.build.targets.wheel]
+only-include = ["tap_plugin/vuln_mosaic"]
