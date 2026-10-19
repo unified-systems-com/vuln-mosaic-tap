@@ -166,9 +166,12 @@ def test_git_links_only_the_system_openssl() -> None:  # fips-2 (git half; the c
     libs: set[bytes] = set()
     for binary in [helper]:
         libs |= set(re.findall(rb"lib[A-Za-z0-9_+-]+\.so[0-9.]*", binary.read_bytes()))
-    curl = next((p for d in ("/usr/lib", "/usr/lib64", "/lib") for p in Path(d).glob("libcurl.so*") if p.is_file()), None)
+    roots = [Path(r) for r in ("/usr/lib", "/usr/lib64", "/lib", "/lib64", "/usr/local/lib") if Path(r).is_dir()]
+    curl = next((p for r in roots for p in r.rglob("libcurl.so*") if p.is_file()), None)
     if curl is None:
-        pytest.skip("libcurl not found; the TLS library cannot be inspected here")
+        # git-remote-https is present and needs libcurl, so not finding it means this check cannot
+        # speak for the image; fail rather than pass on the strength of nothing.
+        pytest.fail("git-remote-https is installed but libcurl was not found under the library roots")
     libs |= set(re.findall(rb"lib[A-Za-z0-9_+-]+\.so[0-9.]*", curl.read_bytes()))
     names = b" ".join(sorted(libs))
     assert b"libssl" in names or b"libcrypto" in names, names

@@ -44,6 +44,9 @@ def scan_wanted_files(home: Path) -> WantedScan:
     """Union of every valid ``wanted/<consumer>.json``; each bad entry is named, none aborts the scan."""
     scan = WantedScan()
     directory = home / "wanted"
+    if directory.is_symlink():
+        scan.problems.append("wanted/: the directory is a symlink, ignored")
+        return scan
     try:
         entries = sorted(os.scandir(directory), key=lambda e: e.name)
     except FileNotFoundError:

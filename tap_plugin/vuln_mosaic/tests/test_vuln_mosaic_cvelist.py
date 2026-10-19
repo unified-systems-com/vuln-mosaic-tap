@@ -192,9 +192,10 @@ def test_git_output_cap_and_timeout(home, upstream) -> None:
     git.ensure_repo()
     with pytest.raises(GitError):
         git.run("ls-remote", upstream.url)
-    slow = Git(home / "g.git", home, remote=upstream.url, allow_protocol="file", timeout=0.0001)
-    with pytest.raises(GitError):
-        slow.run("ls-remote", upstream.url)
+    from tap_plugin.vuln_mosaic import gitops
+
+    _, _, _, outcome = gitops._run_bounded(["sleep", "5"], None, {"PATH": "/usr/bin:/bin"}, 0.3, 10**6)
+    assert outcome == "timeout"
 
 
 def test_https_only_by_default() -> None:

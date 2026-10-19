@@ -129,9 +129,12 @@ def refresh(ctx: RunContext, store: RecordStore, sleep: Callable[[float], None] 
             else:
                 raise FetchError("NVD window exceeded the page bound")
             start = end
-    with store.transaction():
-        store.set_meta("last_mod_end", now)
-        store.set_facts(as_of=now, checked_at=now, source_version=now, fetched_at=now)
+    if not bad:
+        # A quarantined object is an unresolved failure: neither the incremental cursor nor the
+        # freshness facts advance, so the same window is read again and the dataset ages toward stale.
+        with store.transaction():
+            store.set_meta("last_mod_end", now)
+            store.set_facts(as_of=now, checked_at=now, source_version=now, fetched_at=now)
     outcome.counts.update(stored=stored, quarantined=bad)
     outcome.facts = store.facts()
     outcome.source_version = outcome.facts.source_version

@@ -43,6 +43,16 @@ def test_consumer_name_and_symlink_refused(home: Path, tmp_path: Path) -> None: 
     assert any("symlink" in p for p in scan.problems) and len(scan.problems) == 3
 
 
+def test_symlinked_wanted_directory_refused(home: Path, tmp_path: Path) -> None:  # wanted-6
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "victim.json").write_text(json.dumps({"ids": ["CVE-2022-0009"]}))
+    home.mkdir()
+    (home / "wanted").symlink_to(outside)
+    scan = scan_wanted_files(home)
+    assert scan.ids == set() and "symlink" in scan.problems[0]
+
+
 def test_spool_is_idempotent_and_ingested(home: Path) -> None:  # wanted-3
     assert request_id(home, "CVE-2022-0001") is True
     assert request_id(home, "CVE-2022-0001") is False
