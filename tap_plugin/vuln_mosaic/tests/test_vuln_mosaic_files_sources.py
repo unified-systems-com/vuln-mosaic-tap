@@ -261,3 +261,32 @@ def test_nvd_quarantine_does_not_advance_cursor_or_facts(home, clock) -> None:
     with RecordStore.open_writer(home, "nvd") as store:
         nvd.refresh(ctx, store, sleep=lambda s: None)
         assert store.get_meta("last_mod_end") is None and store.facts().checked_at is None
+
+
+def test_get_kev_and_get_epss_read_the_held_files(home, clock) -> None:  # kev-3, epss-3
+    from tap_plugin.vuln_mosaic import lookup
+
+    for fn in (lookup.get_kev, lookup.get_epss):
+        empty = fn("CVE-2021-44228", home=home)
+        assert empty.state == "not-fetched" and empty.dataset.stale is None
+    kev_doc = json.dumps({
+        "catalogVersion": "2026.10.15", "dateReleased": "2026-10-15T00:00:00Z", "count": 1,
+        "vulnerabilities": [{"cveID": "CVE-2021-44228", "dateAdded": "2021-12-10", "dueDate": "2021-12-24",
+                             "requiredAction": "Apply updates.", "knownRansomwareCampaignUse": "Known"}],
+    }).encode()
+    opener = FakeOpener({KEV_URL: (kev_doc, {}), EPSS_URL: (epss_body(rows=("CVE-2021-44228,0.97,0.99", "CVE-2022-0001,0.01,0.2")), {})})
+    ctx = make_context(home, None, clock, fetcher=fetcher_for(opener))
+    kev.refresh(ctx)
+    epss.refresh(ctx)
+    listed = lookup.get_kev("CVE-2021-44228", home=home)
+    assert listed.state == "listed" and listed.entry["dueDate"] == "2021-12-24"
+    assert listed.entry["knownRansomwareCampaignUse"] == "Known" and listed.dataset.source_version == "2026.10.15"
+    assert lookup.get_kev("CVE-2022-0001", home=home).state == "not-listed"
+    scored = lookup.get_epss("CVE-2021-44228", home=home)
+    assert (scored.state, scored.epss, scored.percentile) == ("scored", 0.97, 0.99)
+    assert scored.model_version == "v2026.06.15" and scored.score_date == "2026-10-16T12:02:51Z"
+    assert lookup.get_epss("CVE-2022-0001", home=home).epss == 0.01
+    assert lookup.get_epss("CVE-2023-1111", home=home).state == "not-scored"
+    for fn in (lookup.get_kev, lookup.get_epss):
+        with pytest.raises(ValueError):
+            fn("../x", home=home)
