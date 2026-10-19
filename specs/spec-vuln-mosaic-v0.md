@@ -82,7 +82,7 @@ All operator choices live in one file, `<home>/settings.json`, on the operator's
 
 `tap_plugin/vuln_mosaic/schemas/settings.schema.json` (with a description on the top level and on every property) defines:
 
-- `sources`: an object keyed by source name (`cvelist`, `kev`, `epss`, `nvd`, `osv`). Each entry has `enabled` (boolean), `max_age_days` (positive integer, default 3, the same default grype-tap uses), and for `cvelist` a `mode` of `wanted` (the default) or `full`; for `osv` an `ecosystems` array of ecosystem names.
+- `sources`: an object keyed by source name (`cvelist`, `kev`, `epss`, `nvd`, `osv`). Each entry has `enabled` (boolean), `max_age_days` (positive integer, default 3, the same default grype-tap uses), and for `cvelist` a `mode` of `wanted` (the default) or `full`; for `osv` an `ecosystems` array of ecosystem names, each of which must appear in the bucket's `ecosystems.txt` and match `^[A-Za-z0-9][A-Za-z0-9 ._:-]{0,63}$`; anything else is refused at settings validation (a name can never contain `/` or `..`, because it becomes a directory name).
 - `immediate_fetch`: boolean, default `false` (`req-vuln-mosaic-lookup`).
 - `mirror`: an object keyed by source name whose values are directory paths (`req-vuln-mosaic-mirror`).
 
@@ -111,7 +111,7 @@ Layout under `<home>`:
 
 - `stores/<source>.sqlite` for `cvelist` and `nvd`. Table `records(id TEXT PRIMARY KEY, state TEXT NOT NULL, date_updated TEXT, record_gz BLOB NOT NULL)` holds each record exactly as received, gzipped. Table `meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)` holds the dataset facts of `req-vuln-mosaic-staleness`. Table `wanted(id TEXT PRIMARY KEY, first_wanted TEXT NOT NULL, origin TEXT NOT NULL)` holds spool-added ids (`req-vuln-mosaic-wanted`). Table `quarantine(id TEXT NOT NULL, seen_at TEXT NOT NULL, reason TEXT NOT NULL)` holds records refused by `req-vuln-mosaic-integrity`. WAL journal mode, a busy timeout, and the standard library `sqlite3` module only.
 - `files/<source>/<build>/<artifact>` plus a symlink `files/<source>/current` for `kev`, `epss` and each `osv/<ecosystem>`. A refresh stages beside the live copy, validates, moves the staging directory into `<build>`, atomically repoints `current`, and keeps the two newest builds. A reader resolves `current` once, at the start of its work, and uses that one real path.
-- `<home>/.lock`: the writer holds an exclusive `flock` for the whole refresh and never waits for readers. SQLite readers need no lock.
+- `<home>/.lock`: the writer holds an exclusive `flock` for the whole refresh and never waits for readers. SQLite readers need no lock. The one other writer is an immediate lookup (`req-vuln-mosaic-lookup`), which takes the same lock without waiting past its 10 s budget; if the refresh holds it, the lookup answers *not fetched* and queues the id.
 
 The data is lost when the container is recreated (the directory is in the container filesystem, not a volume); the first run afterwards bootstraps from upstream, and until then every read answers *not fetched*. Wanted-ids mode keeps that bootstrap small; full mode is about 0.7 GB (*inferred* from the 8.5 times expansion measured on the delta sample; the expanded baseline itself is NOT measured). Only code running in the collector's container can read the stores; the collector and grype-tap's scan both run in `tap-web`, where the scheduler process runs (maintainer ruling, 2026-10-16).
 
@@ -197,7 +197,7 @@ Consumers tell the plugin which CVE ids matter by writing a plain file, and the 
 
 - **Batch path:** each consumer writes its own file `<home>/wanted/<consumer>.json`, one file per consumer so writers never race. The file validates against `tap_plugin/vuln_mosaic/schemas/wanted.schema.json` (a top-level `description` string and an `ids` array of strings matching `^CVE-[0-9]{4}-[0-9]{4,}$`, each with a described property). A file that fails validation is ignored for that run and named in the run's results; it never aborts the run.
 - **Spool path:** a read that misses (`req-vuln-mosaic-lookup`) creates `<home>/spool/<CVE-id>` with `O_CREAT | O_EXCL`, so concurrent requests for one id are one file. The collector ingests each spool file into the `wanted` table of the store, fetches the record, and deletes the file. Ids added this way stay wanted and are refreshed with the rest; v0 does not prune the set (its size is bounded by the ids ever asked about).
-- **Wanted set** for a run is the union of every valid `wanted/*.json` file and the `wanted` table.
+- **Wanted set** for a run is the union of every valid `wanted/*.json` file, the `wanted` table, and every id already held in the store. A record once stored is therefore refreshed on every run until the operator prunes it, so a consumer dropping an id from its file cannot leave an old copy reading as fresh. Pruning is an operator act and removes the row from `records` as well.
 - **Modes:** `wanted` (default) fetches and refreshes only the wanted set; `full` is `settings.sources.cvelist.mode = "full"` and fetches every record. The mode applies to `cvelist`; `nvd` is always wanted-ids.
 - A consumer, such as grype-tap, writes its file and calls the read function; it does not import this plugin's internals, and this plugin does not import the consumer's vocabulary.
 
@@ -209,6 +209,7 @@ Consumers tell the plugin which CVE ids matter by writing a plain file, and the 
 | req-vuln-mosaic-wanted-2 | Bad File Does Not Abort | Proposed | A schema-invalid wanted file is skipped and named in the results; the other files and the run proceed. | |
 | req-vuln-mosaic-wanted-3 | Spool Is Idempotent | Proposed | Two requests for one id leave one spool file, and a fetched id is deleted from the spool and added to `wanted`. | |
 | req-vuln-mosaic-wanted-4 | No Consumer Vocabulary | Proposed | The package imports no other plugin; a test fails if `tap_plugin.*` other than its own is imported. | |
+| req-vuln-mosaic-wanted-5 | Held Records Stay Fresh | Proposed | A record already stored is refreshed on a later run although no wanted file lists its id any more. | |
 
 ### The Read Function
 
@@ -231,8 +232,8 @@ get_cve(cve_id: str, *, home: Path | None = None) -> LookupResult
 - **Found:** the record, with the dataset facts and its `stale` flag. A stale dataset still returns its record, flagged.
 - **Rejected:** state `REJECTED` returns `rejected` and no live record.
 - **Miss, deferred (always available):** returns `not-fetched` and creates the spool file of `req-vuln-mosaic-wanted`.
-- **Miss, immediate (only if `settings.immediate_fetch` is true):** calls the same fetch function the collector uses, with a timeout of 10 s, validates it (`req-vuln-mosaic-integrity`), stores it and returns it; on any failure it returns `not-fetched` with the reason in the result and still queues the id. There is one fetch function, so the two paths cannot drift.
-- Reading takes no lock and writes nothing but the spool file.
+- **Miss, immediate (only if `settings.immediate_fetch` is true):** calls the same fetch function the collector uses, with a timeout of 10 s, validates it (`req-vuln-mosaic-integrity`), takes `<home>/.lock` (see `req-vuln-mosaic-store`), stores it and returns it; on any failure, including the lock being held by a refresh, it returns `not-fetched` with the reason in the result and still queues the id. There is one fetch function, so the two paths cannot drift.
+- A read that finds a record takes no lock and writes nothing. A miss writes only the spool file, or, in immediate mode, the one record under the writer lock.
 
 #### Acceptance Criteria
 
@@ -241,6 +242,7 @@ get_cve(cve_id: str, *, home: Path | None = None) -> LookupResult
 | req-vuln-mosaic-lookup-1 | Three Outcomes | Proposed | A held id returns found, a held REJECTED id returns rejected, an unheld id returns not-fetched; none returns an absent record as an empty one. | |
 | req-vuln-mosaic-lookup-2 | Miss Queues | Proposed | With immediate fetch off, a miss makes no network connection and leaves one spool file. | Asserted with egress blocked. |
 | req-vuln-mosaic-lookup-3 | Immediate Uses The Shared Fetch | Proposed | With immediate fetch on, a miss stores and returns the record through the collector's own fetch function; a failure returns not-fetched and queues the id. | |
+| req-vuln-mosaic-lookup-4 | Immediate Respects The Writer Lock | Proposed | With a refresh holding `.lock`, an immediate lookup does not write, answers not-fetched and queues the id. | A concurrency test. |
 | req-vuln-mosaic-lookup-4 | No Django | Proposed | Importing `vuln_mosaic.lookup` imports no Django module. | Import-blocked test. |
 | req-vuln-mosaic-lookup-5 | Malformed Id Refused | Proposed | An id that does not match the pattern raises `ValueError` before any file or network access. | |
 
@@ -404,7 +406,7 @@ URL `https://osv-vulnerabilities.storage.googleapis.com/<ecosystem>/all.zip` (ec
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
-| req-vuln-mosaic-osv-1 | Opt-In Per Ecosystem | Proposed | Only ecosystems listed in settings are fetched; a default install fetches none. | |
+| req-vuln-mosaic-osv-1 | Opt-In Per Ecosystem | Proposed | Only ecosystems listed in settings are fetched; a default install fetches none; a name such as `../x` is refused before any path is built. | |
 | req-vuln-mosaic-osv-2 | Whole Zip Swapped | Proposed | A new zip becomes `current` only after validation; an unchanged one advances `checked_at`. | |
 | req-vuln-mosaic-osv-3 | Disk Budget Stated | Proposed | The settings documentation states the two-build cost of each enabled ecosystem and names Wolfi, Chainguard and Ubuntu as the largest. | |
 
