@@ -8,8 +8,12 @@ from __future__ import annotations
 
 import faulthandler
 import io
+import os
 import socket
 import subprocess
+import sys
+import threading
+import time
 import urllib.error
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
@@ -35,13 +39,30 @@ def corpus(cve_id: str) -> bytes:
     return (CORPUS / f"{cve_id}.json").read_bytes()
 
 
-@pytest.fixture(autouse=True)
-def stack_dump_if_hung():
-    """If a test stalls, print every thread's stack and exit, so a hung CI job leaves a log
-    instead of sitting until the runner's six-hour limit."""
-    faulthandler.dump_traceback_later(240, exit=True)
-    yield
-    faulthandler.cancel_dump_traceback_later()
+_CURRENT: dict[str, str] = {"test": "(none started: collection or setup)"}
+WATCHDOG_SECONDS = 420
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """A watchdog for the whole run. If it passes WATCHDOG_SECONDS, print which test was running
+    and every thread's stack to the REAL stderr (capture suspended) and exit non-zero, so a stalled
+    CI job leaves a readable log instead of sitting until the runner's time limit."""
+
+    def watch() -> None:
+        time.sleep(WATCHDOG_SECONDS)
+        manager = config.pluginmanager.getplugin("capturemanager")
+        if manager is not None:
+            manager.suspend_global_capture(in_=False)
+        sys.__stderr__.write(f"\nvuln_mosaic watchdog: run exceeded {WATCHDOG_SECONDS}s; current test: {_CURRENT['test']}\n")
+        sys.__stderr__.flush()
+        faulthandler.dump_traceback(file=sys.__stderr__, all_threads=True)
+        os._exit(2)
+
+    threading.Thread(target=watch, daemon=True, name="vuln-mosaic-watchdog").start()
+
+
+def pytest_runtest_logstart(nodeid: str, location: object) -> None:
+    _CURRENT["test"] = nodeid
 
 
 @pytest.fixture(autouse=True)
