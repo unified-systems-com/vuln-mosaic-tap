@@ -1,0 +1,22 @@
+manifest_version = "0"
+plugin_version = "0.1.0" # x-release-please-version
+requires_tap = ">=0.3.0"
+slug = "vuln_mosaic"
+name = "TAP Vuln Mosaic"
+description = "Local copies of public vulnerability data — CVE records, CISA KEV, EPSS, NVD and OSV — kept as files and SQLite stores so a running instance makes no lookups at use time. Collects only; it never scans, matches or writes findings."
+
+# No other plugin is imported or referenced (req-vuln-mosaic-wanted-4): consumers write a plain
+# file and call a read function, and this plugin knows nothing of their vocabulary.
+depends_on = []
+
+# The author's DECLARED crypto posture (req-vuln-mosaic-fips). HTTPS and digests use the
+# standard library, which resolves to the image's OpenSSL. The `git` subprocess does its own
+# TLS through whichever library the image's git links; that is verified in
+# req-vuln-mosaic-fips-2 before this declaration is relied on.
+[fips]
+status = "compatible"
+
+[[boot.records]]
+name = "ci"
+description = "RESERVED NAME (req-boot-bootstrap-ci-record): the stack this plugin's own tests run in — depends_on closure (empty) + self, offline, credential-free. The consumer flips self to editable."
+sha256 = "858934afe2d88e1c9647efca71d41826eaf842048b5212316380999c6565c89a"
