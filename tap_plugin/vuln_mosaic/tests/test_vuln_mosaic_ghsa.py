@@ -97,6 +97,11 @@ def test_advisory_paths() -> None:
     ("CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", 9.8),
     ("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N", 0.0),
     ("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/E:P/RL:O/RC:C", 9.8),  # temporal metrics are ignored
+    # Scope changed, not capped at 10: reviewed advisories whose scores GitHub's API returned (the 3.1 base formula).
+    ("CVSS:3.1/AV:N/AC:L/PR:L/UI:R/S:C/C:L/I:L/A:N", 5.4),  # GHSA-269c-h76q-8cxw
+    ("CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:N/A:N", 7.7),  # GHSA-275h-v5h9-vr82
+    ("CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:H/A:N", 9.6),  # GHSA-2h44-8472-frjj
+    ("CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:H/A:H", 9.9),  # GHSA-26vp-8gxg-v4pg
 ])
 def test_cvss_v3_base_scores(vector: str, score: float) -> None:  # ghsa-4
     assert cvss.base_score(vector) == score
@@ -106,6 +111,7 @@ def test_cvss_v3_base_scores(vector: str, score: float) -> None:  # ghsa-4
     "", "CVSS:3.1/AV:N", "CVSS:2.0/AV:N", "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
     "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:X", "CVSS:3.1/AV:N/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
     "CVSS:4.0/AV:N/AC:L/AT:P/PR:L/UI:A/VC:N/VI:H/VA:N/SC:N/SI:N/SA:N",
+    "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/BOGUS:X",  # a key outside the 3.x vocabulary
 ])
 def test_cvss_refuses_what_it_cannot_compute(vector: str) -> None:  # ghsa-4: never guess
     assert cvss.base_score(vector) is None
@@ -346,3 +352,28 @@ def test_full_refresh_runs_ghsa_before_cvelist_and_wants_the_alias(home, adb, up
     assert report.outcomes[0].counts["aliases_wanted"] == 2
     with RecordStore.open_writer(home, "cvelist") as c:
         assert {"CVE-2026-86805", "CVE-2026-87817"} <= c.wanted_ids()
+
+
+def test_unreviewed_change_does_not_displace_a_reviewed_copy(home, adb, clock) -> None:  # ghsa-1, -2
+    reviewed = json.loads(advisory(TOCTOU))
+    reviewed["summary"] = "reviewed copy"
+    unreviewed = json.loads(advisory(TOCTOU))
+    unreviewed["summary"] = "unreviewed copy"
+    adb.commit({path_for(TOCTOU, reviewed=True): json.dumps(reviewed).encode(),
+                path_for(TOCTOU): json.dumps(unreviewed).encode()})
+    want(home, TOCTOU)
+    run(home, adb, clock)
+    assert json.loads(fetch_record(home, "ghsa", TOCTOU)[0].raw)["summary"] == "reviewed copy"
+    unreviewed["modified"] = "2030-01-01T00:00:00Z"
+    unreviewed["summary"] = "unreviewed copy, edited"
+    adb.commit({path_for(TOCTOU): json.dumps(unreviewed).encode()})  # only the unreviewed path changes
+    out = run(home, adb, clock)
+    assert out.ok
+    assert json.loads(fetch_record(home, "ghsa", TOCTOU)[0].raw)["summary"] == "reviewed copy"
+
+
+def test_no_mirror_for_ghsa_is_refused_at_settings() -> None:  # the spec's "no mirror in this version"
+    from tap_plugin.vuln_mosaic.settings import SettingsError
+
+    with pytest.raises(SettingsError, match="mirror"):
+        parse_settings({"mirror": {"ghsa": "/tmp/x"}})

@@ -91,13 +91,22 @@ def refresh(ctx: RunContext, store: RecordStore) -> SourceOutcome:
                 ignored += 1
             elif ghsa_id in wanted:
                 by_id.setdefault(ghsa_id, []).append(change)
+        index: dict[str, str] | None = None
         for ghsa_id, changes in by_id.items():
             # An advisory promoted from unreviewed to reviewed is a delete and an add of one id.
             live = [c for c in changes if c.status != "D" and c.new_sha]
-            if live:
-                to_put[ghsa_id] = max(live, key=lambda c: is_reviewed_path(c.path)).new_sha  # type: ignore[assignment]
-            else:
+            if not live:
                 to_delete.append(ghsa_id)
+            elif all(is_reviewed_path(c.path) for c in live):
+                to_put[ghsa_id] = live[-1].new_sha  # type: ignore[assignment]
+            else:
+                # An unreviewed copy changed: a reviewed copy of the same id, if one exists at the tip,
+                # must still win, and only the whole tree says whether it does.
+                index = index if index is not None else advisory_index(git, tip)
+                if ghsa_id in index:
+                    to_put[ghsa_id] = index[ghsa_id]
+                else:
+                    to_delete.append(ghsa_id)
     missing = [i for i in wanted if i not in held and i not in to_put and i not in to_delete]
     if missing:
         index = advisory_index(git, tip)

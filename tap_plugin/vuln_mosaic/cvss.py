@@ -21,6 +21,8 @@ _WEIGHTS = {
 }
 _PR = {"U": {"N": 0.85, "L": 0.62, "H": 0.27}, "C": {"N": 0.85, "L": 0.68, "H": 0.5}}
 _BASE = ("AV", "AC", "PR", "UI", "S", "C", "I", "A")
+# Temporal and environmental metric names defined by v3.x: accepted and ignored. Any other key refuses the vector.
+_IGNORED = frozenset({"E", "RL", "RC", "CR", "IR", "AR", "MAV", "MAC", "MPR", "MUI", "MS", "MC", "MI", "MA"})
 
 
 def _roundup_31(value: float) -> float:
@@ -60,7 +62,7 @@ def parse_vector(vector: str) -> tuple[str, dict[str, str]] | None:
         if not sep or key in metrics:
             return None
         metrics[key] = value
-    if any(key not in metrics for key in _BASE):
+    if any(key not in metrics for key in _BASE) or any(key not in _BASE and key not in _IGNORED for key in metrics):
         return None
     valid = {**_WEIGHTS, "PR": _PR["U"], "S": {"U": 0, "C": 0}}
     if any(metrics[key] not in valid[key] for key in _BASE):
