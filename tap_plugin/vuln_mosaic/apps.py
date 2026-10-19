@@ -32,3 +32,10 @@ class VulnMosaicConfig(TapPluginConfig):
                 "record carries each source's outcome and staleness."
             ),
         )
+
+        # The CVE panel type (req-vuln-mosaic-panel-cve). Registered in ready(), after every app has loaded.
+        from tap_plugin.vuln_mosaic.panels.cve import VulnMosaicCvePanelType
+
+        from tap_web.registry import panel_type_registry
+
+        panel_type_registry.register(VulnMosaicCvePanelType.slug, VulnMosaicCvePanelType)

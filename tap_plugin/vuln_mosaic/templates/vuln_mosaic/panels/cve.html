@@ -1,0 +1,164 @@
+<div class="tap-panel tap-panel--vmcve">
+    {% if not panel.config.hide_header %}{% include "tap_web/panel_header.html" %}{% endif %}
+
+    {% if state == "no_selection" %}
+    <p class="vmcve-empty">No vulnerability id selected.</p>
+
+    {% elif state == "bad_config" %}
+    <p class="vmcve-empty vmcve-empty--bad">Panel config invalid: {{ detail }}</p>
+
+    {% else %}
+    <article class="vmcve">
+        <header class="vmcve__head">
+            <h3 class="vmcve__id">{{ requested }}</h3>
+            {% if state == "cve" %}
+                {% if record_state == "found" %}<span class="vmcve-badge vmcve-badge--neutral">Published</span>
+                {% elif record_state == "rejected" %}<span class="vmcve-badge vmcve-badge--warn">Rejected</span>
+                {% elif record_state == "not-fetched" %}<span class="vmcve-badge vmcve-badge--muted">Record not fetched</span>
+                {% else %}<span class="vmcve-badge vmcve-badge--warn">Record unavailable</span>{% endif %}
+            {% endif %}
+            <ul class="vmcve__links">
+                {% for link in links %}<li><a href="{{ link.url }}" target="_blank" rel="noopener noreferrer">{{ link.label }}</a></li>{% endfor %}
+            </ul>
+        </header>
+
+        {% if state == "ghsa_only" %}
+        <p class="vmcve-empty">GitHub advisory only. The local CVE datasets hold records for CVE ids.</p>
+        {% elif state == "unrecognised" %}
+        <p class="vmcve-empty">Not a CVE or GitHub advisory id. No local record to show.</p>
+        {% else %}
+
+        {% if record_state == "not-fetched" %}
+        <p class="vmcve-empty">{% if queued %}Queued for the next refresh. {% endif %}Not observed yet.</p>
+        {% endif %}
+
+        <div class="vmcve__grid">
+            {# KEV: red when listed, grey when not, muted when no catalog is held #}
+            <section class="vmcve-card vmcve-card--{% if kev.state == 'listed' %}bad{% elif kev.state == 'not-listed' %}neutral{% else %}muted{% endif %}">
+                <h4>CISA KEV</h4>
+                {% if kev.state == "listed" %}
+                <p class="vmcve-card__value">Listed</p>
+                <dl class="vmcve-kv">
+                    <div><dt>Date added</dt><dd>{{ kev.entry.dateAdded|default:"—" }}</dd></div>
+                    <div><dt>Due date</dt><dd>{{ kev.entry.dueDate|default:"—" }}</dd></div>
+                    <div><dt>Ransomware use</dt><dd>{{ kev.entry.knownRansomwareCampaignUse|default:"—" }}</dd></div>
+                    <div><dt>Required action</dt><dd>{{ kev.entry.requiredAction|default:"—" }}</dd></div>
+                </dl>
+                {% elif kev.state == "not-listed" %}
+                <p class="vmcve-card__value">Not listed</p>
+                {% else %}
+                <p class="vmcve-card__value">Not observed</p>
+                {% endif %}
+                <p class="vmcve-card__src"><a href="{{ kev_catalog_url }}" target="_blank" rel="noopener noreferrer">KEV catalog</a></p>
+            </section>
+
+            <section class="vmcve-card vmcve-card--{% if epss and epss.state == 'scored' %}neutral{% else %}muted{% endif %}">
+                <h4>EPSS</h4>
+                {% if epss and epss.state == "scored" %}
+                <p class="vmcve-card__value">{{ epss.epss|floatformat:5 }}</p>
+                <dl class="vmcve-kv">
+                    <div><dt>Percentile</dt><dd>{{ epss.percentile|floatformat:5 }}</dd></div>
+                    <div><dt>Model</dt><dd>{{ epss.model_version|default:"—" }}</dd></div>
+                    <div><dt>Score date</dt><dd>{{ epss.score_date|default:"—" }}</dd></div>
+                </dl>
+                {% elif epss and epss.state == "not-scored" %}
+                <p class="vmcve-card__value">Not scored</p>
+                {% else %}
+                <p class="vmcve-card__value">Not observed</p>
+                {% endif %}
+                <p class="vmcve-card__src"><a href="{{ epss_url }}" target="_blank" rel="noopener noreferrer">FIRST EPSS</a></p>
+            </section>
+
+            {% if record_state == "found" %}
+            <section class="vmcve-card vmcve-card--muted">
+                <h4>Record</h4>
+                <dl class="vmcve-kv">
+                    <div><dt>Published</dt><dd>{{ published|default:"—" }}</dd></div>
+                    <div><dt>Updated</dt><dd>{{ updated|default:"—" }}</dd></div>
+                    <div><dt>CWE</dt><dd>{% if cwes is None %}—{% elif cwes %}{{ cwes|join:", " }}{% else %}none listed{% endif %}</dd></div>
+                </dl>
+            </section>
+
+            {% if ssvc %}
+            <section class="vmcve-card vmcve-card--muted">
+                <h4>SSVC</h4>
+                <dl class="vmcve-kv">
+                    <div><dt>Exploitation</dt><dd>{{ ssvc.exploitation|default:"—" }}</dd></div>
+                    <div><dt>Automatable</dt><dd>{{ ssvc.automatable|default:"—" }}</dd></div>
+                    <div><dt>Technical impact</dt><dd>{{ ssvc.technical_impact|default:"—" }}</dd></div>
+                    <div><dt>Version</dt><dd>{{ ssvc.version|default:"—" }}</dd></div>
+                </dl>
+            </section>
+            {% endif %}
+            {% endif %}
+        </div>
+
+        {% if record_state == "found" %}
+        <section class="vmcve-section">
+            <h4>CVSS</h4>
+            {% if cvss %}
+            <ul class="vmcve-cvss">
+                {% for m in cvss %}
+                <li class="vmcve-cvss__row vmcve-cvss__row--{{ m.tone }}">
+                    <span class="vmcve-cvss__score">{{ m.score|default_if_none:"—" }}</span>
+                    <span class="vmcve-cvss__meta">{{ m.severity|default:"—" }} · v{{ m.version }} · {{ m.container }}{% if m.primary %} · primary{% endif %}</span>
+                    <span class="vmcve-chips">{% for c in m.chips %}<span class="vmcve-chip" title="{{ c.name }}">{{ c.key }}:{{ c.value }}</span>{% endfor %}</span>
+                </li>
+                {% endfor %}
+            </ul>
+            {% elif cvss is None %}<p class="vmcve-absent">Not observed</p>{% else %}<p class="vmcve-absent">None in the record</p>{% endif %}
+        </section>
+
+        <section class="vmcve-section">
+            <h4>Affected products</h4>
+            {% if products %}
+            <table class="vmcve-table">
+                <thead><tr><th>Vendor</th><th>Product</th><th>Affected ranges</th><th>Fixed in</th></tr></thead>
+                <tbody>
+                {% for p in products %}
+                <tr>
+                    <td>{{ p.vendor|default:"—" }}</td>
+                    <td>{{ p.product|default:"—" }}</td>
+                    <td>{% for r in p.ranges %}<span class="vmcve-chip">{{ r }}</span>{% empty %}—{% endfor %}</td>
+                    <td>{% for v in p.fixed_versions %}<span class="vmcve-chip vmcve-chip--good">{{ v }}</span>{% empty %}—{% endfor %}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}<p class="vmcve-absent">None in the record</p>{% endif %}
+        </section>
+
+        <section class="vmcve-section">
+            <h4>References</h4>
+            {% for group in references %}
+            <div class="vmcve-refs">
+                <span class="vmcve-refs__tag">{{ group.tag }} <span class="vmcve-refs__n">{{ group.total }}</span></span>
+                <ul>
+                    {% for url in group.links %}<li><a href="{{ url }}" target="_blank" rel="noopener noreferrer">{{ url }}</a></li>{% endfor %}
+                    {% if group.more %}<li class="vmcve-refs__more">+{{ group.more }} more</li>{% endif %}
+                </ul>
+            </div>
+            {% empty %}<p class="vmcve-absent">None in the record</p>{% endfor %}
+        </section>
+        {% endif %}
+
+        <footer class="vmcve-datasets">
+            <table class="vmcve-table vmcve-table--compact">
+                <thead><tr><th>Dataset</th><th>As of</th><th>Checked</th><th>Version</th><th>Freshness</th></tr></thead>
+                <tbody>
+                {% for d in datasets %}
+                <tr>
+                    <td>{{ d.label }}</td>
+                    <td>{{ d.as_of|default:"—" }}</td>
+                    <td>{{ d.checked_at|default:"—" }}</td>
+                    <td><code>{{ d.source_version|default:"—" }}</code></td>
+                    <td><span class="vmcve-badge vmcve-badge--{{ d.tone }}">{{ d.freshness }}</span></td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </footer>
+        {% endif %}
+    </article>
+    {% endif %}
+</div>
