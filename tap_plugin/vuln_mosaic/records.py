@@ -58,10 +58,16 @@ class AffectedProduct:
     default_status: str | None
     cpes: tuple[str, ...]
     versions: tuple[AffectedVersion, ...]
-    # Versions the record says are fixed or unaffected: an explicit "unaffected" entry, a "changes"
-    # transition to unaffected, or the "lessThan" bound of an affected range (the first version not
-    # affected). Order of appearance, duplicates removed. Empty means the record names none.
+    # Versions where the record itself says an affected range ends: a "changes" transition to
+    # unaffected, or the "lessThan" bound of an affected range (the first version not affected) unless
+    # another affected range of the same product starts at exactly that version. This is the record's
+    # own bounds, not a remediation guarantee: versions are not compared, so a bound may still sit inside
+    # a different range the record words differently. Order of appearance, duplicates removed; empty
+    # means the record names none.
     fixed_versions: tuple[str, ...]
+    # Versions the record lists with status "unaffected". Not claimed to be fixes: such a version can
+    # predate the vulnerable range.
+    unaffected_versions: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -171,11 +177,18 @@ def _wildcardish(bound: str) -> bool:
 def _affected_product(entry: dict[str, Any]) -> AffectedProduct:
     versions: list[AffectedVersion] = []
     fixed: list[str] = []
+    unaffected: list[str] = []
+    bounds: list[str] = []
+    starts = {
+        str(v.get("version"))
+        for v in entry.get("versions", []) or []
+        if isinstance(v, dict) and v.get("status") == "affected" and v.get("version") is not None
+    }
 
-    def add_fixed(value: object) -> None:
+    def add(target: list[str], value: object) -> None:
         text = _text(value)
-        if text and not _wildcardish(text) and text not in fixed:
-            fixed.append(text)
+        if text and not _wildcardish(text) and text not in target:
+            target.append(text)
 
     for raw in entry.get("versions", []) or []:
         if not isinstance(raw, dict):
@@ -194,12 +207,15 @@ def _affected_product(entry: dict[str, Any]) -> AffectedProduct:
             )
         )
         if raw.get("status") == "unaffected":
-            add_fixed(raw.get("version"))
+            add(unaffected, raw.get("version"))
         for at, status in changes:
             if status == "unaffected":
-                add_fixed(at)
+                add(fixed, at)
         if raw.get("status") == "affected":
-            add_fixed(raw.get("lessThan"))
+            add(bounds, raw.get("lessThan"))
+    for bound in bounds:
+        if bound not in starts:  # a bound that another affected range starts at is not a fix
+            add(fixed, bound)
     cpes = entry.get("cpes")
     return AffectedProduct(
         vendor=_text(entry.get("vendor")),
@@ -209,6 +225,7 @@ def _affected_product(entry: dict[str, Any]) -> AffectedProduct:
         cpes=tuple(c for c in cpes if isinstance(c, str)) if isinstance(cpes, list) else (),
         versions=tuple(versions),
         fixed_versions=tuple(fixed),
+        unaffected_versions=tuple(unaffected),
     )
 
 

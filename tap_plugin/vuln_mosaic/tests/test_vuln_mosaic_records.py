@@ -108,8 +108,18 @@ def test_no_fix_named_gives_an_empty_tuple_not_none() -> None:
     assert intel.fixed_versions == () and intel.versions[0].version == "See references"
 
 
-def test_explicit_unaffected_entry_is_a_fixed_version() -> None:
+def test_explicit_unaffected_is_not_claimed_as_a_fix() -> None:  # review: it can predate the range
     doc = {"containers": {"cna": {"affected": [{"vendor": "v", "product": "p", "versions": [
-        {"version": "1.0", "status": "affected"}, {"version": "1.1", "status": "unaffected"}]}]}}}
-    assert extract_record(doc).affected_products[0].fixed_versions == ("1.1",)
+        {"version": "1.0", "status": "unaffected"}, {"version": "2.0", "status": "affected", "lessThan": "3.0"}]}]}}}
+    product = extract_record(doc).affected_products[0]
+    assert product.unaffected_versions == ("1.0",) and product.fixed_versions == ("3.0",)
+
+
+def test_contiguous_ranges_do_not_report_a_range_start_as_fixed() -> None:  # review: 3.0 is still affected
+    doc = {"containers": {"cna": {"affected": [{"vendor": "v", "product": "p", "versions": [
+        {"version": "1.0", "status": "unaffected"},
+        {"version": "2.0", "status": "affected", "lessThan": "3.0"},
+        {"version": "3.0", "status": "affected", "lessThan": "4.0"}]}]}}}
+    product = extract_record(doc).affected_products[0]
+    assert product.fixed_versions == ("4.0",) and product.unaffected_versions == ("1.0",)
     assert extract_record({"containers": {"cna": {}}}).affected_products is None
