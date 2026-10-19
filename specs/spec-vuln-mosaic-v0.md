@@ -280,9 +280,11 @@ Nothing fetched is applied until it has been verified, and a failure leaves what
 #### Implementation
 
 - **What cannot be verified.** cvelistV5 releases and commits are not signed by a key this plugin can check; git's content hashing and `transfer.fsckObjects` catch corruption, and the digest GitHub reports for a release asset proves the download matches GitHub's copy. None of these authenticates the publisher, and the spec does not claim otherwise.
-- **Per record** (cvelist, nvd): the JSON parses and is under a size cap (8 MiB); `dataType` is `CVE_RECORD`; the major of `dataVersion` is 5; `cveMetadata.cveId` equals the file name and the requested key; `state` is one of `PUBLISHED` or `REJECTED`. A record that fails goes to `quarantine` with the reason, the previous good copy stays, and the run ends failed naming the count.
+- **Per record, cvelist:** the JSON parses and is under a size cap (8 MiB); `dataType` is `CVE_RECORD`; the major of `dataVersion` is 5; `cveMetadata.cveId` equals the file name and the requested key; `state` is one of `PUBLISHED` or `REJECTED`.
+- **Per record, nvd:** NVD API 2.0 objects are not CVE Record v5, so the v5 checks do not apply. The JSON parses and is under the same size cap; `id` matches the CVE-id pattern and equals the requested key; `vulnStatus` is a string, and is stored as the row's `state`. The field names are *documented*, not yet *observed* against a response, and are confirmed against the recorded fixture of `req-vuln-mosaic-nvd-2` before that requirement moves.
+- **A record that fails** either set goes to `quarantine` with the reason, the previous good copy stays, and the run ends failed naming the count.
 - **Per download:** TLS verification on (the default context, never disabled), redirects followed only to HTTPS hosts on the source's allow-list, a timeout, a body size cap per source, and no decompression beyond a stated bound.
-- **Zip** (`osv`): a member-count cap, a per-member size cap, member names matching `^[A-Za-z0-9_.-]+\.json$` (no absolute paths, no `..`), and a bounded sample parsed as JSON. The full archive is not parsed.
+- **Zip** (`osv`): a member-count cap, a per-member size cap, member names matching `^[A-Za-z0-9_.-]+\.json$` (no absolute paths, no `..`), and every member parsed as JSON in a stream, one member in memory at a time, so a malformed member anywhere in the archive refuses the whole zip.
 - **A failure never partially applies:** a bad whole-file download leaves `current` where it was; a bad record batch rolls back the transaction for that source.
 
 #### Acceptance Criteria
@@ -291,8 +293,9 @@ Nothing fetched is applied until it has been verified, and a failure leaves what
 | --- | --- | :---: | --- | --- |
 | req-vuln-mosaic-integrity-1 | Malformed Record Quarantined | Proposed | A record with a wrong `dataType`, a mismatched `cveId` or an unknown `state` is quarantined with a reason, the earlier copy keeps serving, and the run ends failed. | |
 | req-vuln-mosaic-integrity-2 | Bad Download Leaves Current | Proposed | A truncated, oversized or invalid whole-file download leaves `current` and the previous build unchanged. | |
-| req-vuln-mosaic-integrity-3 | Zip Limits | Proposed | A zip with too many members, an oversized member, or a member name containing `..` is refused. | |
+| req-vuln-mosaic-integrity-3 | Zip Limits | Proposed | A zip with too many members, an oversized member, a member name containing `..`, or one malformed JSON member at any position is refused. | |
 | req-vuln-mosaic-integrity-4 | TLS And Redirect Allow-List | Proposed | A redirect to a host outside a source's allow-list, or to plain HTTP, is refused. | |
+| req-vuln-mosaic-integrity-5 | NVD Record Validated By NVD Rules | Proposed | An NVD object with a missing or mismatched `id` is quarantined, and a well-formed NVD object is not rejected for lacking CVE Record v5 fields. | |
 
 ### The Refresh Collector
 
@@ -354,14 +357,14 @@ The FIRST EPSS daily scores are held as a whole file, keeping the model version 
 
 #### Implementation
 
-URL `https://epss.empiricalsecurity.com/epss_scores-current.csv.gz`, which redirects (same host) to a dated file `epss_scores-YYYY-MM-DD.csv.gz` (*observed*: 2.7 MB; first line `#model_version:v2026.06.15,score_date:2026-10-16T12:02:51Z`, then the header `cve,epss,percentile`). Staged, validated and swapped into `files/epss/<build>/` with `current`. Validation: gzip decompresses within a bound; the first line parses into `model_version` and `score_date`; the header row is exactly `cve,epss,percentile`; every sampled row has a CVE id and two numbers in `[0, 1]`; `score_date` is not earlier than the installed one and not in the future. `as_of` is `score_date`; `source_version` is `model_version`. Egress host: `epss.empiricalsecurity.com`.
+URL `https://epss.empiricalsecurity.com/epss_scores-current.csv.gz`, which redirects (same host) to a dated file `epss_scores-YYYY-MM-DD.csv.gz` (*observed*: 2.7 MB; first line `#model_version:v2026.06.15,score_date:2026-10-16T12:02:51Z`, then the header `cve,epss,percentile`). Staged, validated and swapped into `files/epss/<build>/` with `current`. Validation: gzip decompresses within a bound; the first line parses into `model_version` and `score_date`; the header row is exactly `cve,epss,percentile`; every row has a CVE id and two numbers in `[0, 1]` (the file is read in full, streamed); `score_date` is not earlier than the installed one and not in the future. `as_of` is `score_date`; `source_version` is `model_version`. Egress host: `epss.empiricalsecurity.com`.
 
 #### Acceptance Criteria
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
 | req-vuln-mosaic-epss-1 | Header Kept | Proposed | The stored dataset facts carry the file's `model_version` and `score_date`. | |
-| req-vuln-mosaic-epss-2 | Invalid File Refused | Proposed | A file with a wrong header, an out-of-range score or an earlier `score_date` is refused and `current` is unchanged. | |
+| req-vuln-mosaic-epss-2 | Invalid File Refused | Proposed | A file with a wrong header, an earlier `score_date`, or an out-of-range score on any row (first, last or middle) is refused and `current` is unchanged. | |
 
 ### NVD API 2.0
 
