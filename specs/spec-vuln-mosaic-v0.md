@@ -242,9 +242,9 @@ get_cve(cve_id: str, *, home: Path | None = None) -> LookupResult
 | req-vuln-mosaic-lookup-1 | Three Outcomes | Proposed | A held id returns found, a held REJECTED id returns rejected, an unheld id returns not-fetched; none returns an absent record as an empty one. | |
 | req-vuln-mosaic-lookup-2 | Miss Queues | Proposed | With immediate fetch off, a miss makes no network connection and leaves one spool file. | Asserted with egress blocked. |
 | req-vuln-mosaic-lookup-3 | Immediate Uses The Shared Fetch | Proposed | With immediate fetch on, a miss stores and returns the record through the collector's own fetch function; a failure returns not-fetched and queues the id. | |
-| req-vuln-mosaic-lookup-4 | Immediate Respects The Writer Lock | Proposed | With a refresh holding `.lock`, an immediate lookup does not write, answers not-fetched and queues the id. | A concurrency test. |
 | req-vuln-mosaic-lookup-4 | No Django | Proposed | Importing `vuln_mosaic.lookup` imports no Django module. | Import-blocked test. |
 | req-vuln-mosaic-lookup-5 | Malformed Id Refused | Proposed | An id that does not match the pattern raises `ValueError` before any file or network access. | |
+| req-vuln-mosaic-lookup-6 | Immediate Respects The Writer Lock | Proposed | With a refresh holding `.lock`, an immediate lookup does not write, answers not-fetched and queues the id. | A concurrency test. |
 
 ### The Record Parser
 
