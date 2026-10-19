@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "vuln_mosaic wanted ids",
+  "description": "A consumer's list of CVE ids it wants held locally. Written to <home>/wanted/<consumer>.json; the consumer imports nothing from vuln_mosaic and vuln_mosaic imports nothing from the consumer (req-vuln-mosaic-wanted).",
+  "type": "object",
+  "required": [
+    "ids"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "description": {
+      "description": "Free text saying who wrote the file and why.",
+      "type": "string"
+    },
+    "ids": {
+      "description": "CVE ids to hold.",
+      "type": "array",
+      "items": {
+        "description": "One CVE id.",
+        "type": "string",
+        "pattern": "^CVE-[0-9]{4}-[0-9]{4,}$"
+      },
+      "uniqueItems": true
+    }
+  }
+}
