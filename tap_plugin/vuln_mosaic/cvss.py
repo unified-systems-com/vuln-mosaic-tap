@@ -79,6 +79,9 @@ def base_score(vector: str) -> float | None:
     changed = m["S"] == "C"
     iss = 1 - (1 - _WEIGHTS["C"][m["C"]]) * (1 - _WEIGHTS["I"][m["I"]]) * (1 - _WEIGHTS["A"][m["A"]])
     if changed:
+        # The v3.0 and v3.1 BASE formula. v3.1's "ISS * 0.9731 - 0.02, to the 13th" is the environmental
+        # ModifiedImpact and does not belong here; scope-changed v3.1 scores computed with this match
+        # GitHub's published scores (tests/test_vuln_mosaic_ghsa.py).
         impact = 7.52 * (iss - 0.029) - 3.25 * (iss - 0.02) ** 15
     else:
         impact = 6.42 * iss

@@ -171,7 +171,7 @@ def _immediate_ghsa(root: Path, ghsa_id: str) -> GhsaResult | str:
     try:
         with writer_lock(root, wait_seconds=1.0):
             git = Git(ghsa.repo_path(root), root, remote=ghsa.REMOTE, timeout=IMMEDIATE_BUDGET)
-            git.ensure_repo()
+            git.ensure_repo(blobless=True)
             store = RecordStore.open_writer(root, "ghsa")
             try:
                 store.add_wanted(ghsa_id, "immediate")

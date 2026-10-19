@@ -377,3 +377,20 @@ def test_no_mirror_for_ghsa_is_refused_at_settings() -> None:  # the spec's "no 
 
     with pytest.raises(SettingsError, match="mirror"):
         parse_settings({"mirror": {"ghsa": "/tmp/x"}})
+
+
+def test_deleting_one_duplicate_path_keeps_the_other_copy(home, adb, clock) -> None:  # ghsa-2
+    reviewed = json.loads(advisory(TOCTOU))
+    reviewed["summary"] = "reviewed copy"
+    unreviewed = json.loads(advisory(TOCTOU))
+    unreviewed["summary"] = "unreviewed copy"
+    adb.commit({path_for(TOCTOU, reviewed=True): json.dumps(reviewed).encode(),
+                path_for(TOCTOU): json.dumps(unreviewed).encode()})
+    want(home, TOCTOU)
+    run(home, adb, clock)
+    adb.commit({path_for(TOCTOU, reviewed=True): None})  # the reviewed copy goes; the unreviewed one remains
+    out = run(home, adb, clock)
+    assert out.ok and out.counts["deleted"] == 0
+    assert json.loads(fetch_record(home, "ghsa", TOCTOU)[0].raw)["summary"] == "unreviewed copy"
+    adb.commit({path_for(TOCTOU): None})  # now the last copy goes
+    assert run(home, adb, clock).counts["deleted"] == 1 and held(home) == set()

@@ -48,7 +48,7 @@ def advisory_index(git: Git, tip: str) -> dict[str, str]:
 
 def fetch_ids(git: Git, store: RecordStore, ids: list[str]) -> tuple[int, int, int]:
     """Fetch specific ids at the current tip (the immediate lookup). Returns (stored, quarantined, absent)."""
-    tip = git.fetch_tip()
+    tip = git.fetch_tip(blobless=True)
     index = advisory_index(git, tip)
     shas = {i: index[i] for i in ids if i in index}
     stored, bad = apply_shas(git, store, shas, prefetch=True, check=check_ghsa_advisory) if shas else (0, 0)
@@ -95,13 +95,12 @@ def refresh(ctx: RunContext, store: RecordStore) -> SourceOutcome:
         for ghsa_id, changes in by_id.items():
             # An advisory promoted from unreviewed to reviewed is a delete and an add of one id.
             live = [c for c in changes if c.status != "D" and c.new_sha]
-            if not live:
-                to_delete.append(ghsa_id)
-            elif all(is_reviewed_path(c.path) for c in live):
+            if live and all(is_reviewed_path(c.path) for c in live):
                 to_put[ghsa_id] = live[-1].new_sha  # type: ignore[assignment]
             else:
-                # An unreviewed copy changed: a reviewed copy of the same id, if one exists at the tip,
-                # must still win, and only the whole tree says whether it does.
+                # A deletion, or a change to an unreviewed copy: the other copy of the same id, if there
+                # is one at the tip, decides what is held (a reviewed copy wins), and only the whole tree
+                # says whether there is.
                 index = index if index is not None else advisory_index(git, tip)
                 if ghsa_id in index:
                     to_put[ghsa_id] = index[ghsa_id]
