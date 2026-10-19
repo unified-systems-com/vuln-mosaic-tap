@@ -38,7 +38,7 @@ class RunContext:
     settings: Settings
     now: Callable[[], datetime]
     fetcher_factory: Callable[[frozenset[str]], Fetcher]
-    git_factory: Callable[[Path, Path], Git]
+    git_factory: Callable[..., Git]  # (repo, home, remote=None); remote None is cvelistV5
 
 
 @dataclass

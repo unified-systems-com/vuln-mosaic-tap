@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "vuln_mosaic wanted ids",
-  "description": "A consumer's list of CVE ids it wants held locally. Written to <home>/wanted/<consumer>.json; the consumer imports nothing from vuln_mosaic and vuln_mosaic imports nothing from the consumer (req-vuln-mosaic-wanted).",
+  "description": "A consumer's list of CVE and GHSA ids it wants held locally. Written to <home>/wanted/<consumer>.json; the consumer imports nothing from vuln_mosaic and vuln_mosaic imports nothing from the consumer (req-vuln-mosaic-wanted).",
   "type": "object",
   "required": [
     "ids"
@@ -13,12 +13,12 @@
       "type": "string"
     },
     "ids": {
-      "description": "CVE ids to hold.",
+      "description": "CVE ids and GHSA ids to hold. A CVE id is held by the cvelist source, a GHSA id by the ghsa source.",
       "type": "array",
       "items": {
-        "description": "One CVE id.",
+        "description": "One CVE id or one GHSA id.",
         "type": "string",
-        "pattern": "^CVE-[0-9]{4}-[0-9]{4,}$"
+        "pattern": "^(CVE-[0-9]{4}-[0-9]{4,}|GHSA(-[2-9cfghjmpqrvwx]{4}){3})$"
       },
       "uniqueItems": true
     }

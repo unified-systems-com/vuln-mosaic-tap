@@ -16,7 +16,7 @@ from tap_plugin.vuln_mosaic.locking import LockBusy
 from tap_plugin.vuln_mosaic.outcome import RunReport, SourceOutcome
 from tap_plugin.vuln_mosaic.refresh import run_refresh
 from tap_plugin.vuln_mosaic.settings import SettingsError, load_settings
-from tap_plugin.vuln_mosaic.sources import cvelist, epss, kev, nvd, osv
+from tap_plugin.vuln_mosaic.sources import cvelist, epss, ghsa, kev, nvd, osv
 
 from tap_cares.collectors.base import CollectorBase
 from tap_cares.collectors.readiness import (
@@ -43,6 +43,7 @@ _HOSTS = {
     "epss": epss.HOSTS,
     "nvd": nvd.HOSTS,
     "osv": osv.HOSTS,
+    "ghsa": ghsa.HOSTS,
 }
 
 

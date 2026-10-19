@@ -17,9 +17,9 @@ import jsonschema
 
 from tap_plugin.vuln_mosaic.home import resolve_home
 
-SOURCES = ("cvelist", "kev", "epss", "nvd", "osv")
+SOURCES = ("cvelist", "kev", "epss", "nvd", "osv", "ghsa")
 DEFAULT_MAX_AGE_DAYS = 3
-_DEFAULT_ENABLED = {"cvelist": True, "kev": True, "epss": True, "nvd": False, "osv": False}
+_DEFAULT_ENABLED = {"cvelist": True, "kev": True, "epss": True, "nvd": False, "osv": False, "ghsa": False}
 
 
 class SettingsError(ValueError):

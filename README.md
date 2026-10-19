@@ -7,7 +7,7 @@
 ## What this plugin owns
 
 A standalone, near-pure-Python collector that keeps local copies of public vulnerability data (CVE
-records, the CISA KEV catalog, EPSS scores, NVD and OSV records) and a small read function for other
+records, the CISA KEV catalog, EPSS scores, GitHub advisories, NVD and OSV records) and a small read function for other
 modules. It does not scan, match, or write findings.
 
 ## What lives elsewhere

@@ -12,12 +12,13 @@ from tap_plugin.vuln_mosaic.home import resolve_home
 from tap_plugin.vuln_mosaic.locking import writer_lock
 from tap_plugin.vuln_mosaic.outcome import RunContext, RunReport, SourceOutcome
 from tap_plugin.vuln_mosaic.settings import Settings, load_settings
-from tap_plugin.vuln_mosaic.sources import cvelist, epss, kev, nvd, osv
+from tap_plugin.vuln_mosaic.sources import cvelist, epss, ghsa, kev, nvd, osv
 from tap_plugin.vuln_mosaic.staleness import utcnow
 from tap_plugin.vuln_mosaic.store import RecordStore
 from tap_plugin.vuln_mosaic.wanted import ingest_spool
 
-ORDER = ("cvelist", "kev", "epss", "nvd", "osv")
+# ghsa runs before cvelist so the CVE ids it aliases are wanted by cvelist in the same run.
+ORDER = ("ghsa", "cvelist", "kev", "epss", "nvd", "osv")
 
 
 def run_refresh(
@@ -26,7 +27,7 @@ def run_refresh(
     settings: Settings | None = None,
     now: Callable[[], datetime] = utcnow,
     fetcher_factory: Callable[[frozenset[str]], Fetcher] = Fetcher,
-    git_factory: Callable[[Path, Path], Git] = Git,
+    git_factory: Callable[..., Git] = Git,
     sleep: Callable[[float], None] | None = None,
 ) -> RunReport:
     """Run every enabled source once under the writer lock. One source failing never skips the rest."""
@@ -46,11 +47,21 @@ def run_refresh(
 
 
 def _run_source(name: str, ctx: RunContext, report: RunReport, sleep: Callable[[float], None] | None) -> SourceOutcome:
-    if name in ("cvelist", "nvd"):
+    if name in ("cvelist", "nvd", "ghsa"):
         store = RecordStore.open_writer(ctx.home, name)
         try:
+            if name == "ghsa":
+                report.spooled += ingest_spool(ctx.home, store, kind="ghsa")
+                outcome = ghsa.refresh(ctx, store)
+                cvelist_store = RecordStore.open_writer(ctx.home, "cvelist")
+                try:
+                    with cvelist_store.transaction():
+                        outcome.counts["aliases_wanted"] = ghsa.want_aliases(store, cvelist_store)
+                finally:
+                    cvelist_store.close()
+                return outcome
             if name == "cvelist":
-                report.spooled = ingest_spool(ctx.home, store)
+                report.spooled += ingest_spool(ctx.home, store)
                 outcome = cvelist.refresh(ctx, store)
                 report.wanted_problems = [n for n in outcome.notes if n.startswith("wanted/")]
                 return outcome

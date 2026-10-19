@@ -75,6 +75,24 @@ def check_cve_record(raw: bytes, expected_id: str) -> CheckedRecord:
     return CheckedRecord(expected_id, state, updated if isinstance(updated, str) else None)
 
 
+def check_ghsa_advisory(raw: bytes, expected_id: str) -> CheckedRecord:
+    """OSV-format advisory from github/advisory-database: id, schema major, modified (req-vuln-mosaic-ghsa-3)."""
+    record = _loads_object(raw)
+    if record.get("id") != expected_id:
+        raise IntegrityError(f"id {record.get('id')!r} does not match the requested key {expected_id!r}")
+    version = str(record.get("schema_version", ""))
+    if version.split(".")[0] != "1":
+        raise IntegrityError(f"schema_version {version!r} is not major 1")
+    modified = record.get("modified")
+    if not isinstance(modified, str) or not modified:
+        raise IntegrityError("modified missing")
+    for field_name in ("aliases", "severity", "affected", "references"):
+        if field_name in record and not isinstance(record[field_name], list):
+            raise IntegrityError(f"{field_name} is not a list")
+    state = "WITHDRAWN" if record.get("withdrawn") else "PUBLISHED"
+    return CheckedRecord(expected_id, state, modified)
+
+
 def check_nvd_object(raw: bytes, expected_id: str) -> CheckedRecord:
     """NVD API 2.0 vulnerability object: its own rules, not CVE Record v5 (req-vuln-mosaic-integrity-5)."""
     item = _loads_object(raw)

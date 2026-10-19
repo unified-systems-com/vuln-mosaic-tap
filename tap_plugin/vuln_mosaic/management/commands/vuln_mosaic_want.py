@@ -14,16 +14,16 @@ from pathlib import Path
 from django.core.management.base import BaseCommand, CommandError
 
 from tap_plugin.vuln_mosaic.home import resolve_home
-from tap_plugin.vuln_mosaic.ids import validate_cve_id
+from tap_plugin.vuln_mosaic.ids import validate_vuln_id
 from tap_plugin.vuln_mosaic.wanted import CONSUMER_FILE_RE
 
 
 class Command(BaseCommand):
-    help = "Write <home>/wanted/<consumer>.json from CVE ids given as arguments or read from a file (one id per line)."
+    help = "Write <home>/wanted/<consumer>.json from CVE or GHSA ids given as arguments or read from a file (one id per line)."
 
     def add_arguments(self, parser) -> None:  # type: ignore[no-untyped-def]
         parser.add_argument("consumer", help="Consumer name, a plugin slug: ^[a-z][a-z0-9_]{0,63}$")
-        parser.add_argument("ids", nargs="*", help="CVE ids")
+        parser.add_argument("ids", nargs="*", help="CVE or GHSA ids")
         parser.add_argument("--from-file", dest="from_file", help="A file with one id per line")
         parser.add_argument("--description", default="", help="Who wrote the list and why")
 
@@ -37,14 +37,14 @@ class Command(BaseCommand):
         ids: list[str] = []
         for value in raw:
             try:
-                cve_id = validate_cve_id(value)
+                vuln_id = validate_vuln_id(value)
             except ValueError:
-                self.stderr.write(f"skipped (not a CVE id): {value!r}")
+                self.stderr.write(f"skipped (not a CVE or GHSA id): {value!r}")
                 continue
-            if cve_id not in ids:
-                ids.append(cve_id)
+            if vuln_id not in ids:
+                ids.append(vuln_id)
         if not ids:
-            raise CommandError("no valid CVE ids given")
+            raise CommandError("no valid CVE or GHSA ids given")
         wanted = resolve_home() / "wanted"
         wanted.mkdir(parents=True, exist_ok=True)
         target = wanted / f"{consumer}.json"

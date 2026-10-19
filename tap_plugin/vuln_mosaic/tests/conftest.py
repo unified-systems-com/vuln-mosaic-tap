@@ -121,10 +121,13 @@ def upstream(tmp_path: Path) -> Upstream:
 
 
 def make_context(home: Path, upstream: Upstream | None, clock: Callable[[], datetime], settings: Settings | None = None,
-                 fetcher: Callable[[frozenset[str]], Fetcher] | None = None) -> RunContext:
-    def git_factory(repo: Path, h: Path) -> Git:
-        assert upstream is not None
-        return Git(repo, h, remote=upstream.url, allow_protocol="file")
+                 fetcher: Callable[[frozenset[str]], Fetcher] | None = None,
+                 ghsa_upstream: Upstream | None = None) -> RunContext:
+    def git_factory(repo: Path, h: Path, remote: str | None = None) -> Git:
+        # A source that names a remote (ghsa) gets its own local upstream; cvelist names none.
+        chosen = ghsa_upstream if remote is not None else upstream
+        assert chosen is not None
+        return Git(repo, h, remote=chosen.url, allow_protocol="file")
 
     def no_fetcher(_hosts: frozenset[str]) -> Fetcher:
         raise AssertionError("unexpected HTTP fetch")
