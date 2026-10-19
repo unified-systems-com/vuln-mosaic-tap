@@ -32,16 +32,18 @@ def test_real_records_pass() -> None:
     assert integrity.check_cve_record(corpus(REJECTED), REJECTED).state == "REJECTED"
 
 
+# Explicit ids: pytest builds a test id from a bytes parameter's content, and the oversized case is
+# 8 MiB, which made the id itself 8 MiB long (it stalled the CI harness's collection).
 @pytest.mark.parametrize(
     "raw",
     [
-        record(dataType="CVE_RECORD_X"),
-        record(dataVersion="4.0"),
-        record(cveId="CVE-2022-9999"),
-        record(state="RESERVED"),
-        b"not json",
-        b"[]",
-        b"x" * (integrity.MAX_RECORD_BYTES + 1),
+        pytest.param(record(dataType="CVE_RECORD_X"), id="wrong-dataType"),
+        pytest.param(record(dataVersion="4.0"), id="wrong-major"),
+        pytest.param(record(cveId="CVE-2022-9999"), id="wrong-id"),
+        pytest.param(record(state="RESERVED"), id="unknown-state"),
+        pytest.param(b"not json", id="not-json"),
+        pytest.param(b"[]", id="not-an-object"),
+        pytest.param(b"x" * (integrity.MAX_RECORD_BYTES + 1), id="oversized"),
     ],
 )
 def test_malformed_cve_record_refused(raw: bytes) -> None:  # integrity-1
