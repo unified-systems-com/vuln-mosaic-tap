@@ -306,13 +306,39 @@ def test_get_ghsa_withdrawn_is_never_live(home, adb, clock) -> None:  # ghsa-6
     assert result.state == WITHDRAWN and result.advisory.withdrawn == "2026-10-01T00:00:00Z"
 
 
-def test_get_ghsa_not_fetched_queues_and_says_when_the_source_is_off(home) -> None:  # ghsa-6
+def test_get_ghsa_off_source_queues_nothing(home) -> None:  # ghsa-6: no undrainable spool entry on a default install
     first = get_ghsa(TOCTOU, home=home)
-    assert first.state == NOT_FETCHED and (home / "spool" / TOCTOU).exists()
-    assert "not enabled" in first.reason
+    assert first.state == NOT_FETCHED and "not enabled" in first.reason
     assert first.dataset.stale is None  # unobserved, never fresh
+    assert not (home / "spool").exists() or not list((home / "spool").iterdir())
+
+
+def test_get_ghsa_enabled_source_queues_a_miss(home) -> None:  # ghsa-6
+    home.mkdir(parents=True)
+    (home / "settings.json").write_text(json.dumps(ENABLED))
+    first = get_ghsa(TOCTOU, home=home)
+    assert first.state == NOT_FETCHED and first.reason == "queued for the next refresh"
+    assert (home / "spool" / TOCTOU).exists()
+    assert get_ghsa(TOCTOU, home=home).reason.startswith("already queued")
     assert get_ghsa(RESOLVER, home=home, queue=False).reason == "not held; not queued"
     assert not (home / "spool" / RESOLVER).exists()
+
+
+def test_first_refresh_aligns_a_record_held_from_an_immediate_lookup(home, adb, clock) -> None:  # ghsa-2
+    seed(adb)
+    ctx = make_context(home, None, clock, parse_settings(ENABLED), ghsa_upstream=adb)
+    git = ctx.git_factory(ghsa.repo_path(home), home, remote=ghsa.REMOTE)
+    git.ensure_repo(blobless=True)
+    with RecordStore.open_writer(home, "ghsa") as store:  # what an immediate lookup leaves: held, no applied ref
+        store.add_wanted(TOCTOU, "immediate")
+        assert ghsa.fetch_ids(git, store, [TOCTOU])[0] == 1
+    newer = json.loads(advisory(TOCTOU))
+    newer["withdrawn"] = "2026-10-10T00:00:00Z"
+    newer["modified"] = "2026-10-10T00:00:00Z"
+    adb.commit({path_for(TOCTOU): json.dumps(newer).encode()})
+    assert run(home, adb, clock).ok
+    stored, _ = fetch_record(home, "ghsa", TOCTOU)
+    assert stored.state == "WITHDRAWN" and json.loads(stored.raw)["withdrawn"]
 
 
 def test_get_ghsa_and_get_cve_refuse_each_others_ids(home) -> None:  # ghsa-6

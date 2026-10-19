@@ -143,15 +143,16 @@ def get_ghsa(ghsa_id: str, *, home: Path | None = None, queue: bool = True) -> G
         return _ghsa_result(stored.state, stored.raw, _info(facts, age))
     if not queue:
         return GhsaResult(NOT_FETCHED, None, _info(facts, age), "not held; not queued")
-    queued = request_id(root, ghsa_id)
-    reason = "queued for the next refresh" if queued else "already queued, or the queue is full"
     try:
         settings = load_settings(root)
     except SettingsError as exc:
         return GhsaResult(NOT_FETCHED, None, _info(facts, age), f"settings invalid: {exc}")
     if not settings.sources["ghsa"].enabled:
-        reason += "; the ghsa source is not enabled, so nothing will fetch it"
-    elif settings.immediate_fetch:
+        # Nothing would ever drain the spool entry, and the spool is bounded and shared with CVE misses.
+        return GhsaResult(NOT_FETCHED, None, _info(facts, age), "the ghsa source is not enabled; not queued")
+    queued = request_id(root, ghsa_id)
+    reason = "queued for the next refresh" if queued else "already queued, or the queue is full"
+    if settings.immediate_fetch:
         fetched = _immediate_ghsa(root, ghsa_id)
         if isinstance(fetched, GhsaResult):
             return fetched

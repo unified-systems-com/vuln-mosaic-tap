@@ -106,7 +106,9 @@ def refresh(ctx: RunContext, store: RecordStore) -> SourceOutcome:
                     to_put[ghsa_id] = index[ghsa_id]
                 else:
                     to_delete.append(ghsa_id)
-    missing = [i for i in wanted if i not in held and i not in to_put and i not in to_delete]
+    # With no applied ref yet, a held record may have come from an immediate lookup at an older tip, so every
+    # wanted id is aligned with this tip; after that the diff keeps held records current.
+    missing = [i for i in wanted if (last is None or i not in held) and i not in to_put and i not in to_delete]
     if missing:
         index = advisory_index(git, tip)
         for ghsa_id in missing:

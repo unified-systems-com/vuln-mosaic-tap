@@ -111,7 +111,9 @@ def refresh(ctx: RunContext, store: RecordStore) -> SourceOutcome:
             if cve_id:
                 to_put[cve_id] = sha
     if wanted is not None:
-        missing = [i for i in wanted if i not in held and i not in to_put and i not in to_delete]
+        # With no applied ref yet, a held record may have come from an immediate lookup at an older tip, so
+        # every wanted id is aligned with this tip; after that the diff keeps held records current.
+        missing = [i for i in wanted if (last is None or i not in held) and i not in to_put and i not in to_delete]
         if missing:
             located = git.blob_ids(tip, [record_path(i) for i in missing])
             for cve_id in missing:
