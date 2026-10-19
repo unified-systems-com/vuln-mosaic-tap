@@ -1,6 +1,6 @@
 # Vuln Mosaic Plugin Specification
 
-**Vuln Mosaic is a standalone, near-pure-Python collector that keeps local copies of public vulnerability data (CVE records, the CISA KEV catalog, EPSS scores, NVD and OSV records) in stores it owns, plus a small read function for other modules, so that a running TAP instance reads vulnerability facts from local files and makes no lookup at use time.**
+**Vuln Mosaic is a standalone, near-pure-Python collector that keeps local copies of public vulnerability data (CVE records, the CISA KEV catalog, EPSS scores, GitHub advisories, NVD and OSV records) in stores it owns, plus a small read function for other modules, so that a running TAP instance reads vulnerability facts from local files and makes no lookup at use time.**
 
 ## Plugin Identity
 
@@ -58,6 +58,7 @@ Three consequences shape v0:
 | req-vuln-mosaic-epss | [FIRST EPSS Scores](#first-epss-scores) | Implemented | Whole-file source; keeps the model version and score date |
 | req-vuln-mosaic-nvd | [NVD API 2.0](#nvd-api-20) | Proposed | By CVE id and by last-modified window for wanted ids; gated on terms and limits not yet read |
 | req-vuln-mosaic-osv | [OSV, Per Ecosystem](#osv-per-ecosystem) | Implemented | Opt-in per ecosystem; whole zip swapped; the large ecosystems named |
+| req-vuln-mosaic-ghsa | [GitHub Security Advisories](#github-security-advisories) | Implemented | GHSA ids to their CVE aliases, with a CVSS v3 base score computed from the vector; off by default; no mirror yet |
 | req-vuln-mosaic-mirror | [The Operator Mirror](#the-operator-mirror) | Implemented | No-egress fallback: an artifact copy plus a sha256 manifest, verified before use |
 | req-vuln-mosaic-fips | [FIPS Declaration](#fips-declaration) | Implemented | `[fips]` table; stdlib crypto uses the image's OpenSSL; git's TLS path to be verified |
 | req-vuln-mosaic-corpus | [The Corpus Proof](#the-corpus-proof) | Implemented | Tests from real committed records, an egress-blocked run and a negative test per fail-closed path |
@@ -84,11 +85,11 @@ All operator choices live in one file, `<home>/settings.json`, on the operator's
 
 `tap_plugin/vuln_mosaic/schemas/settings.schema.json` (with a description on the top level and on every property) defines:
 
-- `sources`: an object keyed by source name (`cvelist`, `kev`, `epss`, `nvd`, `osv`). Each entry has `enabled` (boolean), `max_age_days` (positive integer, default 3, the same default grype-tap uses), and for `cvelist` a `mode` of `wanted` (the default) or `full`; for `osv` an `ecosystems` array of ecosystem names, each of which must appear in the bucket's `ecosystems.txt` and match `^[A-Za-z0-9][A-Za-z0-9 ._:-]{0,63}$`; anything else is refused at settings validation (a name can never contain `/` or `..`, because it becomes a directory name).
+- `sources`: an object keyed by source name (`cvelist`, `kev`, `epss`, `nvd`, `osv`, `ghsa`). Each entry has `enabled` (boolean), `max_age_days` (positive integer, default 3, the same default grype-tap uses), and for `cvelist` a `mode` of `wanted` (the default) or `full`; for `osv` an `ecosystems` array of ecosystem names, each of which must appear in the bucket's `ecosystems.txt` and match `^[A-Za-z0-9][A-Za-z0-9 ._:-]{0,63}$`; anything else is refused at settings validation (a name can never contain `/` or `..`, because it becomes a directory name).
 - `immediate_fetch`: boolean, default `false` (`req-vuln-mosaic-lookup`).
 - `mirror`: an object keyed by source name whose values are directory paths (`req-vuln-mosaic-mirror`).
 
-Defaults when the file is absent: `cvelist` (wanted), `kev` and `epss` enabled; `nvd` and `osv` disabled until the operator enables them. Code reads settings only through `tap_plugin/vuln_mosaic/settings.py`, which returns a frozen object.
+Defaults when the file is absent: `cvelist` (wanted), `kev` and `epss` enabled; `nvd`, `osv` and `ghsa` disabled until the operator enables them. Code reads settings only through `tap_plugin/vuln_mosaic/settings.py`, which returns a frozen object.
 
 #### Acceptance Criteria
 
@@ -197,8 +198,8 @@ Consumers tell the plugin which CVE ids matter by writing a plain file, and the 
 
 #### Implementation
 
-- **Batch path:** each consumer writes its own file `<home>/wanted/<consumer>.json`, one file per consumer so writers never race. `<consumer>` matches `^[a-z][a-z0-9_]{0,63}$` (a plugin slug); the collector ignores, and names in its run record, any file in `wanted/` whose name does not, and never builds a path from an unvalidated name. A `wanted/` entry that is a symlink is ignored and named; files are opened with `O_NOFOLLOW`. The file validates against `tap_plugin/vuln_mosaic/schemas/wanted.schema.json` (a top-level `description` string and an `ids` array of strings matching `^CVE-[0-9]{4}-[0-9]{4,}$`, each with a described property). A file that fails validation is ignored for that run and named in the run's results; it never aborts the run.
-- **Spool path:** a read that misses (`req-vuln-mosaic-lookup`) creates `<home>/spool/<CVE-id>` with `O_CREAT | O_EXCL`, so concurrent requests for one id are one file. The collector ingests each spool file into the `wanted` table of the store, fetches the record, and deletes the file. Ids added this way stay wanted and are refreshed with the rest; v0 does not prune the set (its size is bounded by the ids ever asked about).
+- **Batch path:** each consumer writes its own file `<home>/wanted/<consumer>.json`, one file per consumer so writers never race. `<consumer>` matches `^[a-z][a-z0-9_]{0,63}$` (a plugin slug); the collector ignores, and names in its run record, any file in `wanted/` whose name does not, and never builds a path from an unvalidated name. A `wanted/` entry that is a symlink is ignored and named; files are opened with `O_NOFOLLOW`. The file validates against `tap_plugin/vuln_mosaic/schemas/wanted.schema.json` (a top-level `description` string and an `ids` array of strings, each a CVE id matching `^CVE-[0-9]{4}-[0-9]{4,}$` or a GHSA id matching `^GHSA(-[2-9cfghjmpqrvwx]{4}){3}$`, each with a described property; `cvelist` reads the CVE ids and `ghsa` the GHSA ids, and each ignores the other kind). A file that fails validation is ignored for that run and named in the run's results; it never aborts the run.
+- **Spool path:** a read that misses (`req-vuln-mosaic-lookup`, `req-vuln-mosaic-ghsa-6`) creates `<home>/spool/<CVE-id or GHSA-id>` with `O_CREAT | O_EXCL`, so concurrent requests for one id are one file. The collector ingests each spool file into the `wanted` table of the store, fetches the record, and deletes the file. Ids added this way stay wanted and are refreshed with the rest; v0 does not prune the set (its size is bounded by the ids ever asked about).
 - **Wanted set** for a run is the union of every valid `wanted/*.json` file, the `wanted` table, and every id already held in the store. A record once stored is therefore refreshed on every run until the operator prunes it, so a consumer dropping an id from its file cannot leave an old copy reading as fresh. Pruning is an operator act and removes the row from `records` as well.
 - **Modes:** `wanted` (default) fetches and refreshes only the wanted set; `full` is `settings.sources.cvelist.mode = "full"` and fetches every record. The mode applies to `cvelist`; `nvd` is always wanted-ids.
 - A consumer, such as grype-tap, writes its file and calls the read function; it does not import this plugin's internals, and this plugin does not import the consumer's vocabulary.
@@ -416,6 +417,41 @@ URL `https://osv-vulnerabilities.storage.googleapis.com/<ecosystem>/all.zip` (ec
 | req-vuln-mosaic-osv-1 | Opt-In Per Ecosystem | Implemented | Only ecosystems listed in settings are fetched; a default install fetches none; a name such as `../x` is refused before any path is built. | |
 | req-vuln-mosaic-osv-2 | Whole Zip Swapped | Implemented | A new zip becomes `current` only after validation; an unchanged one advances `checked_at`. | |
 | req-vuln-mosaic-osv-3 | Disk Budget Stated | Implemented | The settings documentation states the two-build cost of each enabled ecosystem and names Wolfi, Chainguard and Ubuntu as the largest. | |
+
+### GitHub Security Advisories
+
+----
+RID: `req-vuln-mosaic-ghsa`
+
+Status: `Implemented`
+
+A GHSA id is not a CVE id and does not appear in a CVE record, so an advisory GitHub has scored but whose id a consumer holds only as `GHSA-…` cannot be read through `get_cve`. This source holds GitHub's own advisory records for the GHSA ids consumers ask for, so a consumer can map a GHSA id to the CVE ids it aliases and read a CVSS base score without a live lookup. It was added at the maintainer's request on 2026-10-19 (relayed from rampart-pg-ui), for five demo vulnerabilities that carried no `cvss_score`.
+
+#### Implementation
+
+Remote `https://github.com/github/advisory-database.git`, branch `main`, bare repository at `<home>/git/advisory-database.git`, fetched exactly as `req-vuln-mosaic-cvelist` fetches: blobless, shallow, incremental by `git diff --raw --no-abbrev` from `refs/applied/last`, blobs fetched by object id in batches, the same scrubbed environment and bounds. Egress host: `github.com` only. Records are stored as received in `<home>/stores/ghsa.sqlite` (the same SQLite store, `state` being `PUBLISHED`, or `WITHDRAWN` when the advisory has a `withdrawn` date). Off by default.
+
+*Observed* 2026-10-19: a blobless depth-1 clone was 48 MB in 5.6 s and listed 391,144 paths under `advisories/`, 36,910 of them under `github-reviewed/` and the rest under `unreviewed/`. The layout is `advisories/<github-reviewed|unreviewed>/<year>/<month>/<GHSA id>/<GHSA id>.json`, records are OSV-format (`schema_version` 1.4.0). All five ids in the originating request were in `unreviewed/`, so the source reads both trees. A real run against GitHub for those five ids stored five records and a second run took 13 s with nothing new to fetch (*ran*).
+
+- **Path is found, not derived.** The year and month directories are the advisory's publication date, which the id does not carry. A wanted id's path is found by listing the tree at the fetched commit, which a blobless clone holds, and the blob id comes from that listing. If an id appears under both trees the `github-reviewed` copy wins. An advisory promoted from `unreviewed/` to `github-reviewed/` is a delete and an add of one id in one diff and is applied as an update, not a deletion.
+- **Wanted ids.** GHSA ids come from the same consumer files, the same spool and the same held-ids rule as CVE ids (`req-vuln-mosaic-wanted`); the `ghsa` source reads the GHSA kind and `cvelist` the CVE kind.
+- **Aliases feed cvelist.** The refresh runs `ghsa` before `cvelist` and adds every CVE id that a held advisory aliases to the `cvelist` wanted table (origin `ghsa-alias`), so the CNA record for the alias is held the same run. This is how a consumer goes from `GHSA-…` to the CVE record, KEV entry and EPSS score it already can read.
+- **CVSS.** The advisory carries a vector string in `severity[].score` and no number (*observed*: `CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:H/I:H/A:L` with no base score). `vuln_mosaic.cvss` computes the v3.0 and v3.1 base score from the vector with the FIRST specification's formulas, stdlib only. It does not compute v2 or v4 scores: such a vector is kept with `base_score = None`, and `best_cvss` never returns it as a v3 number. One of the five originating advisories (the Python `tarfile` link-extraction fallback) carries only a v4 vector (*observed*), so it reads as unscored here until v4 scoring exists or the alias's CVE record carries a number.
+- **Read function.** `get_ghsa(ghsa_id, *, home=None, queue=True)` returns `found`, `withdrawn` or `not-fetched` with the parsed advisory (aliases, CVE ids, summary, details, GitHub's severity label, CWE ids, CVSS metrics, reference urls with their type, and affected packages with the range ends the advisory names), and the dataset facts. A malformed id raises `ValueError` before any I/O, and a CVE id is malformed for it as a GHSA id is for `get_cve`. A miss queues the id; when the `ghsa` source is not enabled the reason says nothing will fetch it, so a consumer is not told "queued" about work that will not happen.
+- **Licence.** The data licence is NOT read here; it must be read before a deployment redistributes the data. Egress is one host the plugin already uses for cvelistV5.
+- **No mirror in this version.** `mirror.ghsa` is refused by the settings schema; an offline deployment cannot use this source yet.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-vuln-mosaic-ghsa-1 | Path Found By Listing | Implemented | A wanted id is located by listing the tree at the fetched commit, whatever its year and month directory, and a reviewed copy wins over an unreviewed one. | Real advisories in a local upstream. |
+| req-vuln-mosaic-ghsa-2 | Increment And Promotion | Implemented | A later fetch applies exactly the changes to held advisories; an advisory moved between trees is updated, not deleted; one deleted upstream removes its row; an id absent upstream is counted, not a failure. | |
+| req-vuln-mosaic-ghsa-3 | Verified Before Applied | Implemented | An advisory whose `id` differs from its key, whose `schema_version` is not major 1, or that lacks `modified` or has a non-list field is quarantined, the good records of the batch are kept, and the dataset facts and applied ref do not advance. | |
+| req-vuln-mosaic-ghsa-4 | Score Computed, Never Guessed | Implemented | The v3.0 and v3.1 base scores equal the published scores for known vectors (including the five originating advisories' values as read from GitHub's API); an incomplete, duplicated, unknown or v2/v4 vector yields no score. | |
+| req-vuln-mosaic-ghsa-5 | Wanted And Aliases | Implemented | A wanted file or spool entry holding a GHSA id is read by `ghsa` only; a malformed GHSA id invalidates its file; a held advisory's CVE aliases become wanted by `cvelist` in the same run, once. | |
+| req-vuln-mosaic-ghsa-6 | Three States | Implemented | `get_ghsa` returns found, withdrawn (never as live) or not-fetched with unobserved staleness, queues a miss unless `queue=False`, and refuses a CVE id. | |
+| req-vuln-mosaic-ghsa-7 | Off By Default | Implemented | A default install does not fetch this source. | |
 
 ### The Operator Mirror
 

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import jsonschema
 
-from tap_plugin.vuln_mosaic.ids import validate_cve_id
+from tap_plugin.vuln_mosaic.ids import GHSA_ID_RE, validate_vuln_id
 from tap_plugin.vuln_mosaic.settings import load_schema
 from tap_plugin.vuln_mosaic.store import RecordStore
 
@@ -21,7 +21,8 @@ MAX_WANTED_FILE_BYTES = 8 * 1024 * 1024
 
 @dataclass
 class WantedScan:
-    ids: set[str] = field(default_factory=set)
+    ids: set[str] = field(default_factory=set)  # CVE ids
+    ghsa_ids: set[str] = field(default_factory=set)
     problems: list[str] = field(default_factory=list)
 
 
@@ -66,21 +67,22 @@ def scan_wanted_files(home: Path) -> WantedScan:
         except (OSError, ValueError, jsonschema.ValidationError) as exc:
             scan.problems.append(f"wanted/{name}: invalid ({str(exc).splitlines()[0][:160]})")
             continue
-        scan.ids.update(document["ids"])
+        for value in document["ids"]:
+            (scan.ghsa_ids if GHSA_ID_RE.fullmatch(value) else scan.ids).add(value)
     return scan
 
 
 MAX_SPOOL = 5000
 
 
-def request_id(home: Path, cve_id: str) -> bool:
+def request_id(home: Path, vuln_id: str) -> bool:
     """Queue an id for the next refresh. ``O_EXCL`` makes concurrent requests one file.
 
     The spool is bounded (``MAX_SPOOL`` entries): a read-triggered write must not let a viewer grow
     the directory, or the next refresh's fetch set, without limit. At the cap nothing is created and
     ``False`` is returned; the id is simply not queued.
     """
-    validate_cve_id(cve_id)
+    validate_vuln_id(vuln_id)
     spool = home / "spool"
     spool.mkdir(parents=True, exist_ok=True)
     try:
@@ -90,15 +92,17 @@ def request_id(home: Path, cve_id: str) -> bool:
     if queued >= MAX_SPOOL:
         return False
     try:
-        fd = os.open(spool / cve_id, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        fd = os.open(spool / vuln_id, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
     except FileExistsError:
         return False
     os.close(fd)
     return True
 
 
-def ingest_spool(home: Path, store: RecordStore) -> list[str]:
-    """Move spooled ids into the ``wanted`` table and remove their files. Bad names are left alone."""
+def ingest_spool(home: Path, store: RecordStore, *, kind: str = "cve") -> list[str]:
+    """Move spooled ids of ``kind`` (``cve`` or ``ghsa``) into the ``wanted`` table and remove their files.
+
+    Bad names, and ids of the other kind, are left alone for the store that owns them."""
     spool = home / "spool"
     taken: list[str] = []
     try:
@@ -107,15 +111,17 @@ def ingest_spool(home: Path, store: RecordStore) -> list[str]:
         return taken
     for name in names:
         try:
-            cve_id = validate_cve_id(name)
+            vuln_id = validate_vuln_id(name)
         except ValueError:
             continue
-        store.add_wanted(cve_id, "spool")
+        if bool(GHSA_ID_RE.fullmatch(vuln_id)) != (kind == "ghsa"):
+            continue
+        store.add_wanted(vuln_id, "spool")
         os.unlink(spool / name)
-        taken.append(cve_id)
+        taken.append(vuln_id)
     return taken
 
 
-def wanted_set(scan: WantedScan, store: RecordStore) -> set[str]:
+def wanted_set(scan: WantedScan, store: RecordStore, *, kind: str = "cve") -> set[str]:
     """Consumer files, the wanted table and every id already held (req-vuln-mosaic-wanted-5)."""
-    return scan.ids | store.wanted_ids() | store.held_ids()
+    return (scan.ghsa_ids if kind == "ghsa" else scan.ids) | store.wanted_ids() | store.held_ids()

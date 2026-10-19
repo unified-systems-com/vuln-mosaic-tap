@@ -19,7 +19,7 @@ from .test_vuln_mosaic_files_sources import EPSS_URL, KEV_URL, epss_body, kev_bo
 PACKAGE = Path(refresh_mod.__file__).parent
 
 
-def run(home, upstream, clock, opener, settings=None):
+def run(home, upstream, clock, opener, settings=None, ghsa_upstream=None):
     from tap_plugin.vuln_mosaic.gitops import Git
 
     return refresh_mod.run_refresh(
@@ -27,7 +27,9 @@ def run(home, upstream, clock, opener, settings=None):
         settings=parse_settings(settings or {}),
         now=clock,
         fetcher_factory=fetcher_for(opener),
-        git_factory=lambda repo, h: Git(repo, h, remote=upstream.url, allow_protocol="file"),
+        git_factory=lambda repo, h, remote=None: Git(
+            repo, h, remote=(ghsa_upstream if remote else upstream).url, allow_protocol="file"
+        ),
     )
 
 

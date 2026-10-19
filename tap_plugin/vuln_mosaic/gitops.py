@@ -105,12 +105,12 @@ class Git:
         repo: Path,
         home: Path,
         *,
-        remote: str = REMOTE,
+        remote: str | None = None,
         allow_protocol: str = "https",
         timeout: float = DEFAULT_TIMEOUT,
         max_output: int = MAX_OUTPUT_BYTES,
     ) -> None:
-        self.repo, self.remote = repo, remote
+        self.repo, self.remote = repo, remote or REMOTE
         self._home = home / "git-home"
         self._allow = allow_protocol
         self._timeout, self._max_output = timeout, max_output
@@ -234,9 +234,9 @@ class Git:
             i += 2
         return changes
 
-    def list_records(self, commit: str) -> list[tuple[str, str]]:
-        """Every record path with its blob id at ``commit`` (full mode)."""
-        out = self.run("ls-tree", "-r", "-z", commit, "cves/").decode("utf-8", "surrogateescape")
+    def list_records(self, commit: str, prefix: str = "cves/") -> list[tuple[str, str]]:
+        """Every blob path under ``prefix`` with its blob id at ``commit`` (full mode, and GHSA lookup)."""
+        out = self.run("ls-tree", "-r", "-z", commit, prefix).decode("utf-8", "surrogateescape")
         entries = []
         for item in out.split("\0"):
             if not item:

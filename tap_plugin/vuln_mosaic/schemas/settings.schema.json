@@ -105,6 +105,22 @@
               "uniqueItems": true
             }
           }
+        },
+        "ghsa": {
+          "description": "GitHub Security Advisories (the advisory-database repository), for the wanted GHSA ids. Off by default; the first fetch downloads about 48 MB of tree data, and advisories are read only for the ids consumers ask for. Egress host: github.com.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "description": "Whether the refresh fetches this source. Default false.",
+              "type": "boolean"
+            },
+            "max_age_days": {
+              "description": "A dataset checked longer ago than this is stale. Default 3.",
+              "type": "integer",
+              "minimum": 1
+            }
+          }
         }
       }
     },

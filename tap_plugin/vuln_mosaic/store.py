@@ -15,7 +15,7 @@ from pathlib import Path
 
 from tap_plugin.vuln_mosaic.staleness import DatasetFacts, to_iso, utcnow
 
-RECORD_SOURCES = ("cvelist", "nvd")
+RECORD_SOURCES = ("cvelist", "nvd", "ghsa")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS records(
@@ -116,6 +116,11 @@ class RecordStore:
 
     def delete(self, cve_id: str) -> None:
         self._conn.execute("DELETE FROM records WHERE id = ?", (cve_id,))
+
+    def iter_raw(self) -> Iterator[tuple[str, bytes]]:
+        """Every (id, raw record) held, in id order."""
+        for row in self._conn.execute("SELECT id, record_gz FROM records ORDER BY id").fetchall():
+            yield row[0], gzip.decompress(row[1])
 
     def held_ids(self) -> set[str]:
         return {r[0] for r in self._conn.execute("SELECT id FROM records")}

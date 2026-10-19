@@ -9,7 +9,8 @@ from typing import Any
 
 from tap_plugin.vuln_mosaic import files
 from tap_plugin.vuln_mosaic.home import resolve_home
-from tap_plugin.vuln_mosaic.ids import validate_cve_id
+from tap_plugin.vuln_mosaic.advisories import ParsedAdvisory, extract_advisory
+from tap_plugin.vuln_mosaic.ids import validate_cve_id, validate_ghsa_id
 from tap_plugin.vuln_mosaic.locking import LockBusy, writer_lock
 from tap_plugin.vuln_mosaic.settings import SettingsError, load_settings
 from tap_plugin.vuln_mosaic.staleness import DatasetFacts, is_stale
@@ -40,9 +41,9 @@ def _info(facts: DatasetFacts, max_age_days: int) -> DatasetInfo:
     return DatasetInfo(facts.as_of, facts.checked_at, facts.source_version, is_stale(facts.checked_at, max_age_days))
 
 
-def _max_age(home: Path) -> int:
+def _max_age(home: Path, source: str = "cvelist") -> int:
     try:
-        return load_settings(home).sources["cvelist"].max_age_days
+        return load_settings(home).sources[source].max_age_days
     except SettingsError:
         return 3
 
@@ -105,6 +106,88 @@ def _immediate(root: Path, cve_id: str) -> LookupResult | str:
     if stored_rec.state == "REJECTED":
         return LookupResult(REJECTED, None, dataset)
     return LookupResult(FOUND, json.loads(stored_rec.raw), dataset)
+
+
+# ---------------------------------------------------------------------------------------------
+# GitHub Security Advisories (req-vuln-mosaic-ghsa)
+# ---------------------------------------------------------------------------------------------
+
+WITHDRAWN = "withdrawn"
+
+
+@dataclass(frozen=True)
+class GhsaResult:
+    """``state`` is ``found``, ``withdrawn`` or ``not-fetched``.
+
+    ``advisory`` is set for ``found`` and ``withdrawn`` (a withdrawn advisory is kept so its
+    aliases and withdrawal date can be read; it is never presented as live). Its ``cve_ids`` are
+    the CVEs it aliases: read their CNA records with ``get_cve``.
+    """
+
+    state: str
+    advisory: ParsedAdvisory | None
+    dataset: DatasetInfo
+    reason: str | None = None
+
+
+def get_ghsa(ghsa_id: str, *, home: Path | None = None, queue: bool = True) -> GhsaResult:
+    """Return found, withdrawn or not-fetched. Raises ``ValueError`` for a malformed id before any I/O.
+
+    ``queue=False`` makes a miss a pure read: nothing is written and the immediate fetch is not tried.
+    """
+    validate_ghsa_id(ghsa_id)
+    root = resolve_home(home)
+    age = _max_age(root, "ghsa")
+    stored, facts = fetch_record(root, "ghsa", ghsa_id)
+    if stored is not None:
+        return _ghsa_result(stored.state, stored.raw, _info(facts, age))
+    if not queue:
+        return GhsaResult(NOT_FETCHED, None, _info(facts, age), "not held; not queued")
+    queued = request_id(root, ghsa_id)
+    reason = "queued for the next refresh" if queued else "already queued, or the queue is full"
+    try:
+        settings = load_settings(root)
+    except SettingsError as exc:
+        return GhsaResult(NOT_FETCHED, None, _info(facts, age), f"settings invalid: {exc}")
+    if not settings.sources["ghsa"].enabled:
+        reason += "; the ghsa source is not enabled, so nothing will fetch it"
+    elif settings.immediate_fetch:
+        fetched = _immediate_ghsa(root, ghsa_id)
+        if isinstance(fetched, GhsaResult):
+            return fetched
+        reason = fetched
+    return GhsaResult(NOT_FETCHED, None, _info(facts, age), reason)
+
+
+def _ghsa_result(state: str, raw: bytes, dataset: DatasetInfo) -> GhsaResult:
+    advisory = extract_advisory(json.loads(raw))
+    return GhsaResult(WITHDRAWN if state == "WITHDRAWN" else FOUND, advisory, dataset)
+
+
+def _immediate_ghsa(root: Path, ghsa_id: str) -> GhsaResult | str:
+    from tap_plugin.vuln_mosaic.gitops import Git, GitError
+    from tap_plugin.vuln_mosaic.sources import ghsa
+
+    try:
+        with writer_lock(root, wait_seconds=1.0):
+            git = Git(ghsa.repo_path(root), root, remote=ghsa.REMOTE, timeout=IMMEDIATE_BUDGET)
+            git.ensure_repo()
+            store = RecordStore.open_writer(root, "ghsa")
+            try:
+                store.add_wanted(ghsa_id, "immediate")
+                stored, bad, _ = ghsa.fetch_ids(git, store, [ghsa_id])
+            finally:
+                store.close()
+    except LockBusy:
+        return "a refresh is running; queued for it"
+    except GitError as exc:
+        return f"immediate fetch failed: {exc}"
+    if not stored:
+        return "quarantined by verification" if bad else "not present upstream"
+    record, facts = fetch_record(root, "ghsa", ghsa_id)
+    if record is None:  # pragma: no cover - just written
+        return "stored record not readable"
+    return _ghsa_result(record.state, record.raw, _info(facts, _max_age(root, "ghsa")))
 
 
 # ---------------------------------------------------------------------------------------------

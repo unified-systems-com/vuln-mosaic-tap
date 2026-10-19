@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from tap_plugin.vuln_mosaic.gitops import Git, GitError
 from tap_plugin.vuln_mosaic.ids import id_from_record_path, record_path
-from tap_plugin.vuln_mosaic.integrity import IntegrityError, check_cve_record
+from tap_plugin.vuln_mosaic.integrity import CheckedRecord, IntegrityError, check_cve_record
 from tap_plugin.vuln_mosaic.mirror import MirrorError, load_artifact
 from tap_plugin.vuln_mosaic.outcome import RunContext, SourceOutcome
 from tap_plugin.vuln_mosaic.staleness import is_stale, to_iso
@@ -22,7 +23,8 @@ def repo_path(home: Path) -> Path:
 
 
 def apply_shas(
-    git: Git, store: RecordStore, wanted_shas: dict[str, str], *, prefetch: bool
+    git: Git, store: RecordStore, wanted_shas: dict[str, str], *, prefetch: bool,
+    check: Callable[[bytes, str], CheckedRecord] = check_cve_record,
 ) -> tuple[int, int]:
     """Read, verify and write records by blob id. Returns (stored, quarantined).
 
@@ -37,7 +39,7 @@ def apply_shas(
     for cve_id, sha in wanted_shas.items():
         raw = blobs[sha]
         try:
-            checked = check_cve_record(raw, cve_id)
+            checked = check(raw, cve_id)
         except IntegrityError as exc:
             bad.append((cve_id, str(exc)))
             continue
