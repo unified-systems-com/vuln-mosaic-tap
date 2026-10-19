@@ -61,6 +61,8 @@ Three consequences shape v0:
 | req-vuln-mosaic-mirror | [The Operator Mirror](#the-operator-mirror) | Implemented | No-egress fallback: an artifact copy plus a sha256 manifest, verified before use |
 | req-vuln-mosaic-fips | [FIPS Declaration](#fips-declaration) | Implemented | `[fips]` table; stdlib crypto uses the image's OpenSSL; git's TLS path to be verified |
 | req-vuln-mosaic-corpus | [The Corpus Proof](#the-corpus-proof) | Implemented | Tests from real committed records, an egress-blocked run and a negative test per fail-closed path |
+| req-vuln-mosaic-panel-cve | [The CVE Panel](#the-cve-panel) | Implemented | One panel type showing a CVE's record, KEV entry and EPSS score from the local datasets, structured, no prose |
+| req-vuln-mosaic-commands | [Operator Commands](#operator-commands) | Implemented | `vuln_mosaic_want` writes a consumer's wanted file; `vuln_mosaic_refresh` runs a refresh now |
 | req-vuln-mosaic-nongoals | [Non-Goals](#non-goals) | Implemented | No scanning, matching or findings; no records as nodes; no pages in v0 |
 | req-vuln-mosaic-osv-incremental | [OSV Increments](#osv-increments) | Backlog | Apply OSV's modified-id list instead of swapping whole zips |
 | req-vuln-mosaic-data-home | [A Platform Data Directory](#a-platform-data-directory) | Backlog | A core convention for operator data directories, deferred |
@@ -478,6 +480,58 @@ The tests run over real records committed to the repository, with the network bl
 | req-vuln-mosaic-corpus-3 | Cross-Process Read | Implemented | A reader in a second process reads consistent data while the writer refreshes, on Linux in the container. | Resolves the open WAL question. |
 | req-vuln-mosaic-corpus-4 | Negative Per Path | Implemented | Each fail-closed path in `req-vuln-mosaic-integrity` has a test that injects the fault and asserts the previous data is unchanged. | |
 
+### The CVE Panel
+
+----
+RID: `req-vuln-mosaic-panel-cve`
+
+Status: `Implemented`
+
+One panel type, `vuln-mosaic-cve`, shows what the local datasets hold about one vulnerability id, so an analyst does not leave the page. It is a reversal of the 2026-10-16 ruling "no pages or panels in v0", made at the maintainer's request on 2026-10-19 (relayed through the rampart-pg sessions): the panel is the only surface, `req-vuln-mosaic-status-panel` stays Backlog, and no page ships. A consumer plugin mounts an instance and owns the page.
+
+#### Implementation
+
+`tap_plugin/vuln_mosaic/panels/cve/__init__.py` defines `VulnMosaicCvePanelType` (slug `vuln-mosaic-cve`, view `vuln_mosaic/panels/cve.html`, css `vuln_mosaic/css/cve.css`), registered in `apps.py` `ready()` on `tap_web.registry.panel_type_registry`. The page forwards its query parameters to the panel request (*observed* 2026-10-19: the page's `hx-get` carries `?vuln_id=…`), and the panel reads the one named by the config key `vuln_id_var` (default `vuln_id`).
+
+Config (`CVE_PANEL_CONFIG_SCHEMA`, every property described, unknown keys refused): `vuln_id_var` (string), `hide_header` (boolean), `queue_misses` (boolean, default true: a request for an id the stores do not hold queues it for the next refresh, which is a write on a read, so it is bounded to 5,000 spool entries and can be turned off), `max_references_per_tag` (integer, default 8). An instance is a `panel` node whose `view` is `vuln_mosaic/panels/cve.html` and whose `config` is that object.
+
+The panel calls `get_cve`, `get_kev` and `get_epss` inside the request. The stores are local files, so the request path makes no network call (the module imports no HTTP, socket or subprocess module). Sections, all structured and without generated prose: record state and outside links; CISA KEV (listed, dateAdded, dueDate, ransomware flag, requiredAction as given); EPSS (score, percentile, model version, score date); record (published, updated, CWE); SSVC; CVSS from the CNA and CISA-ADP containers with the vector split into metric chips; affected products with `fixed_versions` only; references grouped by tag; and a dataset table (as of, checked, version, freshness). Colours are the stat-card tokens (red for KEV and critical/high, yellow for medium and stale, grey for zero, low, not listed and unobserved), with the same dark-mode selectors, and a tone is always paired with a word.
+
+States: no id selected; invalid config; a CVE id (record found, rejected, or not fetched, where the id is queued by `get_cve` and the panel shows an unobserved placeholder); a GitHub advisory id (a note and advisory and OSV links, no CVE lookup, no error); anything else (a note, no links). A dataset with no `checked_at` reads *unobserved*, never fresh. Outside links are built only for ids of the owning source, and each form returned 200 on 2026-10-19: `https://www.cve.org/CVERecord?id=<CVE>`, `https://nvd.nist.gov/vuln/detail/<CVE>`, `https://github.com/advisories/<GHSA>`, `https://osv.dev/vulnerability/<id>`, `https://www.first.org/epss/` and `https://www.cisa.gov/known-exploited-vulnerabilities-catalog`. A reference URL from a record is linked only if it is http or https, and all record text is escaped.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-vuln-mosaic-panel-cve-1 | Registered With A Described Config | Implemented | The panel type is on the panel registry under `vuln-mosaic-cve`, and its config schema describes every property and refuses unknown keys. | |
+| req-vuln-mosaic-panel-cve-2 | Local Datasets Only | Implemented | Rendering a held CVE shows its KEV entry, EPSS score and record sections, and the panel module imports no network module. | |
+| req-vuln-mosaic-panel-cve-3 | Unobserved Is Not Fresh | Implemented | A dataset with no `checked_at` renders as unobserved, a not-fetched record renders a placeholder and is queued, and neither reads as fresh. | |
+| req-vuln-mosaic-panel-cve-4 | Foreign Ids Handled | Implemented | A GHSA id renders a note and its own links without any CVE lookup and without an error; an unrecognised id renders a note with no links; links exist only for ids of the owning source. | |
+| req-vuln-mosaic-panel-cve-5 | Only Range Ends As Fixes | Implemented | `unaffected_versions` never appear in the output; `fixed_versions` do. | |
+| req-vuln-mosaic-panel-cve-6 | Hostile Record Text | Implemented | A `javascript:` reference is not linked and record-supplied markup is escaped. | |
+| req-vuln-mosaic-panel-cve-7 | Theme Aware | Implemented | The stylesheet defines the panel's tokens for light, for dark by preference and for `data-theme="dark"`, with the stat-card values. | |
+| req-vuln-mosaic-panel-cve-8 | Queue Bounded And Optional | Implemented | With `queue_misses` false a miss writes nothing; with it true the spool never grows past its bound. | |
+
+### Operator Commands
+
+----
+RID: `req-vuln-mosaic-commands`
+
+Status: `Implemented`
+
+Two Django management commands let an operator prime a stack without writing files by hand.
+
+#### Implementation
+
+`manage.py vuln_mosaic_want <consumer> [ids…] [--from-file F]` validates the consumer name (`^[a-z][a-z0-9_]{0,63}$`) and every id, skips malformed ids with a message, and writes `<home>/wanted/<consumer>.json` atomically, replacing that consumer's earlier list and touching no other consumer's file. `manage.py vuln_mosaic_refresh` runs one refresh in the calling process under the writer lock and prints each source's outcome; it exits non-zero when a source failed or is stale, or when the lock is held. Neither makes a network call except the refresh itself.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-vuln-mosaic-commands-1 | Want Writes A Valid File | Implemented | The command writes a file the wanted scan accepts, drops duplicates and malformed ids, replaces its own earlier list, and refuses a bad consumer name or an empty list. | |
+| req-vuln-mosaic-commands-2 | Refresh Reports | Implemented | The refresh command prints each outcome and fails when the run is not clean. | |
+
 ### Non-Goals
 
 ----
@@ -491,7 +545,7 @@ Things this plugin is not going to do, stated so a later change cannot grow into
 
 - **No scanning, matching or findings.** It does not decide which packages are affected by which CVE, and writes no finding. Scanning and matching belong to grype-tap; the vulnerability vocabulary belongs to compliance_core.
 - **No vulnerability records as graph nodes** (`req-vuln-mosaic-grift-bridge` records the question).
-- **No pages or panels in v0** (`req-vuln-mosaic-status-panel`).
+- **No pages, and one panel type** (`req-vuln-mosaic-panel-cve`, added 2026-10-19 at the maintainer's request); a dataset status view stays Backlog (`req-vuln-mosaic-status-panel`).
 - **KEV is a lookup, not a status source.** The KEV file is for CVEs Grype never matched; KEV status for matched vulnerabilities stays with grype-tap.
 
 #### Acceptance Criteria
@@ -499,7 +553,7 @@ Things this plugin is not going to do, stated so a later change cannot grow into
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
 | req-vuln-mosaic-nongoals-1 | No Findings Written | Implemented | A full run writes no `finding`, `vulnerability` or other graph node; its only grid footprint is the collection job and the seeded schedule. | |
-| req-vuln-mosaic-nongoals-2 | No Pages Shipped | Implemented | The manifest declares no pages and no panel types. | |
+| req-vuln-mosaic-nongoals-2 | No Pages Shipped | Implemented | The package ships no page, and the manifest declares no pages; its one panel type is registered in code. | |
 
 ### OSV Increments
 
