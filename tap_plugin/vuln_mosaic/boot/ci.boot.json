@@ -9,7 +9,7 @@
         "source": {
           "type": "git",
           "url": "https://github.com/unified-systems-com/vuln-mosaic-tap",
-          "rev": "v0.1.0"
+          "rev": "v0.2.0"
         }
       }
     ]

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from tap_plugin.vuln_mosaic import files
 from tap_plugin.vuln_mosaic.home import resolve_home
 from tap_plugin.vuln_mosaic.ids import validate_cve_id
 from tap_plugin.vuln_mosaic.locking import LockBusy, writer_lock
@@ -99,3 +100,90 @@ def _immediate(root: Path, cve_id: str) -> LookupResult | str:
     if stored_rec.state == "REJECTED":
         return LookupResult(REJECTED, None, dataset)
     return LookupResult(FOUND, json.loads(stored_rec.raw), dataset)
+
+
+# ---------------------------------------------------------------------------------------------
+# Whole-file datasets: KEV and EPSS (req-vuln-mosaic-kev, req-vuln-mosaic-epss)
+# ---------------------------------------------------------------------------------------------
+
+LISTED, NOT_LISTED = "listed", "not-listed"
+SCORED, NOT_SCORED = "scored", "not-scored"
+
+
+@dataclass(frozen=True)
+class KevResult:
+    """``state`` is ``listed``, ``not-listed`` or ``not-fetched`` (no catalog is held yet).
+
+    ``entry`` is the catalog entry as published (cveID, vendorProject, product, vulnerabilityName,
+    dateAdded, shortDescription, requiredAction, dueDate, knownRansomwareCampaignUse, notes, cwes
+    where present); ``not-listed`` is a statement about the catalog held, not about the CVE.
+    """
+
+    state: str
+    entry: dict[str, Any] | None
+    dataset: DatasetInfo
+
+
+@dataclass(frozen=True)
+class EpssResult:
+    """``state`` is ``scored``, ``not-scored`` or ``not-fetched``. Only the current day is held."""
+
+    state: str
+    epss: float | None
+    percentile: float | None
+    model_version: str | None
+    score_date: str | None
+    dataset: DatasetInfo
+
+
+def _file_info(root: Path, source: str) -> DatasetInfo:
+    try:
+        age = load_settings(root).sources[source].max_age_days
+    except SettingsError:
+        age = 3
+    return _info(files.read_facts(root, source), age)
+
+
+def get_kev(cve_id: str, *, home: Path | None = None) -> KevResult:
+    """Look an id up in the held CISA KEV catalog. Raises ``ValueError`` for a malformed id."""
+    validate_cve_id(cve_id)
+    root = resolve_home(home)
+    info = _file_info(root, "kev")
+    try:
+        handle = files.open_current(root, "kev", "known_exploited_vulnerabilities.json")
+    except FileNotFoundError:
+        return KevResult(NOT_FETCHED, None, info)
+    with handle:
+        try:
+            catalog = json.load(handle)
+        except ValueError:
+            return KevResult(NOT_FETCHED, None, info)
+    for entry in catalog.get("vulnerabilities", []):
+        if isinstance(entry, dict) and entry.get("cveID") == cve_id:
+            return KevResult(LISTED, entry, info)
+    return KevResult(NOT_LISTED, None, info)
+
+
+def get_epss(cve_id: str, *, home: Path | None = None) -> EpssResult:
+    """Look an id up in the held EPSS scores (current day only). Raises ``ValueError`` for a malformed id."""
+    import gzip
+
+    validate_cve_id(cve_id)
+    root = resolve_home(home)
+    info = _file_info(root, "epss")
+    try:
+        handle = files.open_current(root, "epss", "epss_scores.csv.gz")
+    except FileNotFoundError:
+        return EpssResult(NOT_FETCHED, None, None, None, None, info)
+    prefix = f"{cve_id},".encode()
+    with handle, gzip.open(handle, "rb") as rows:
+        first = rows.readline().decode().strip()
+        model_version = score_date = None
+        if first.startswith("#"):
+            parts = dict(p.split(":", 1) for p in first[1:].split(",") if ":" in p)
+            model_version, score_date = parts.get("model_version"), parts.get("score_date")
+        for line in rows:
+            if line.startswith(prefix):
+                _, epss, percentile = line.decode().strip().split(",")
+                return EpssResult(SCORED, float(epss), float(percentile), model_version, score_date, info)
+    return EpssResult(NOT_SCORED, None, None, model_version, score_date, info)

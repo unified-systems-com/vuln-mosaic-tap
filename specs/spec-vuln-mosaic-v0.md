@@ -258,7 +258,7 @@ Status: `Implemented`
 
 #### Implementation
 
-`extract_record(record: dict) -> ParsedRecord` returns a frozen dataclass with: `cve_id`, `state`, the CVSS metrics found in the CNA container first and in the CISA-ADP container as a fallback (each with its source container, version, base score, severity and vector), CWE ids from the `problemTypes` of the CNA container then CISA-ADP, the SSVC decision points (exploitation, automatable, technical impact, with version and timestamp) from the CISA-ADP metrics entry of type `ssvc`, dates, the `affected` entries and reference URLs. The SSVC entry location (`metrics[].other.type == "ssvc"`) was *observed* on 1,736 of 1,855 sampled records; the exact shape of its options is *documented* and is confirmed against the corpus fixtures.
+`extract_record(record: dict) -> ParsedRecord` returns a frozen dataclass with: `cve_id`, `state`, `reference_details` (each reference's URL with its tags, such as `vendor-advisory`, `patch`, `exploit`, `mailing-list`; an empty tuple when the record gives none) and `affected_products` (vendor, product, package name, default status, CPEs, the version ranges as given, and `fixed_versions`: a version the record marks unaffected, a transition to unaffected inside a range, or the `lessThan` bound of an affected range, wildcard package names excluded), the CVSS metrics found in the CNA container first and in the CISA-ADP container as a fallback (each with its source container, version, base score, severity and vector), CWE ids from the `problemTypes` of the CNA container then CISA-ADP, the SSVC decision points (exploitation, automatable, technical impact, with version and timestamp) from the CISA-ADP metrics entry of type `ssvc`, dates, the `affected` entries and reference URLs. The SSVC entry location (`metrics[].other.type == "ssvc"`) was *observed* on 1,736 of 1,855 sampled records; the exact shape of its options is *documented* and is confirmed against the corpus fixtures.
 
 Absent data uses the three states: `None` is unobserved (the container or field is not in the record), an empty list or empty object is observed-empty. The CNA-first rule is evidence-backed: in the sample the CNA carried CVSS on 1,799 records and CWE on 1,825, and CISA-ADP carried CVSS on 38 and CWE on 28.
 
@@ -270,6 +270,8 @@ Absent data uses the three states: `None` is unobserved (the container or field 
 | req-vuln-mosaic-records-2 | SSVC From CISA-ADP | Implemented | A record with a CISA-ADP SSVC entry yields its three decision points, version and timestamp; one without yields `None`. | |
 | req-vuln-mosaic-records-3 | Three States | Implemented | A record with no `problemTypes` yields `None` CWEs; one with an empty list yields an empty list. | |
 | req-vuln-mosaic-records-4 | Standard Library Only | Implemented | The module imports nothing outside the standard library. | Import test. |
+| req-vuln-mosaic-records-5 | Reference Tags Parsed | Implemented | Each reference is returned with its URL and its tags; a reference without tags has an empty tuple, a record without references has `None`. | Added 2026-10-19 at the maintainer's request, via rampart-pg-ui. |
+| req-vuln-mosaic-records-6 | Fixed Versions Parsed | Implemented | `fixed_versions` lists the versions a record names as fixed (unaffected entry, change to unaffected, or `lessThan` bound); a record naming none gives an empty tuple. | Checked on the Log4Shell and snipe-it corpus records. |
 
 ### Integrity, Fail Closed
 
@@ -340,7 +342,7 @@ The CISA Known Exploited Vulnerabilities catalog is held as a whole file, as a l
 
 #### Implementation
 
-URL `https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json` (*observed*: about 1.7 MB, `catalogVersion` such as `2026.10.15`, `dateReleased`, `count`). Staged, validated and swapped into `files/kev/<build>/known_exploited_vulnerabilities.json` with `current` repointed. Validation: a JSON object with `catalogVersion`, `dateReleased`, `count` and a `vulnerabilities` array whose length equals `count`; each entry's `cveID` matches the id pattern; `catalogVersion` is not lower than the installed one (compared as dotted integers) and `dateReleased` is not in the future. The catalog has no delta, so a refresh downloads the whole file and an unchanged `catalogVersion` advances only `checked_at`. Egress host: `www.cisa.gov`. Consumers read `files/kev/current/known_exploited_vulnerabilities.json` and the dataset facts beside it.
+URL `https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json` (*observed*: about 1.7 MB, `catalogVersion` such as `2026.10.15`, `dateReleased`, `count`). Staged, validated and swapped into `files/kev/<build>/known_exploited_vulnerabilities.json` with `current` repointed. Validation: a JSON object with `catalogVersion`, `dateReleased`, `count` and a `vulnerabilities` array whose length equals `count`; each entry's `cveID` matches the id pattern; `catalogVersion` is not lower than the installed one (compared as dotted integers) and `dateReleased` is not in the future. The catalog has no delta, so a refresh downloads the whole file and an unchanged `catalogVersion` advances only `checked_at`. Egress host: `www.cisa.gov`. Consumers read `files/kev/current/known_exploited_vulnerabilities.json` and the dataset facts beside it, or call `vuln_mosaic.lookup.get_kev(cve_id)`, which returns `listed`, `not-listed` or `not-fetched`, the catalog entry as published (dateAdded, dueDate, requiredAction, knownRansomwareCampaignUse and the rest) and the dataset facts.
 
 #### Acceptance Criteria
 
@@ -348,6 +350,7 @@ URL `https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilit
 | --- | --- | :---: | --- | --- |
 | req-vuln-mosaic-kev-1 | Swap On New Version | Implemented | A catalog with a higher `catalogVersion` becomes `current`; the same version only advances `checked_at`. | |
 | req-vuln-mosaic-kev-2 | Rollback And Count Refused | Implemented | A lower `catalogVersion`, a future `dateReleased`, or a `count` that disagrees with the array is refused and `current` is unchanged. | |
+| req-vuln-mosaic-kev-3 | Entry Readable By Id | Implemented | `get_kev` returns the published entry for a listed id, `not-listed` for an unlisted one, and `not-fetched` with `stale = None` before any catalog is held. | |
 
 ### FIRST EPSS Scores
 
@@ -360,7 +363,7 @@ The FIRST EPSS daily scores are held as a whole file, keeping the model version 
 
 #### Implementation
 
-URL `https://epss.empiricalsecurity.com/epss_scores-current.csv.gz`, which redirects (same host) to a dated file `epss_scores-YYYY-MM-DD.csv.gz` (*observed*: 2.7 MB; first line `#model_version:v2026.06.15,score_date:2026-10-16T12:02:51Z`, then the header `cve,epss,percentile`). Staged, validated and swapped into `files/epss/<build>/` with `current`. Validation: gzip decompresses within a bound; the first line parses into `model_version` and `score_date`; the header row is exactly `cve,epss,percentile`; every row has a CVE id and two numbers in `[0, 1]` (the file is read in full, streamed); `score_date` is not earlier than the installed one and not in the future. `as_of` is `score_date`; `source_version` is `model_version`. Egress host: `epss.empiricalsecurity.com`.
+URL `https://epss.empiricalsecurity.com/epss_scores-current.csv.gz`, which redirects (same host) to a dated file `epss_scores-YYYY-MM-DD.csv.gz` (*observed*: 2.7 MB; first line `#model_version:v2026.06.15,score_date:2026-10-16T12:02:51Z`, then the header `cve,epss,percentile`). Staged, validated and swapped into `files/epss/<build>/` with `current`. Validation: gzip decompresses within a bound; the first line parses into `model_version` and `score_date`; the header row is exactly `cve,epss,percentile`; every row has a CVE id and two numbers in `[0, 1]` (the file is read in full, streamed); `score_date` is not earlier than the installed one and not in the future. `as_of` is `score_date`; `source_version` is `model_version`. Only the current day is held (no history). `vuln_mosaic.lookup.get_epss(cve_id)` returns `scored`, `not-scored` or `not-fetched`, the score, the percentile, the model version and the score date, and the dataset facts. Egress host: `epss.empiricalsecurity.com`.
 
 #### Acceptance Criteria
 
@@ -368,6 +371,7 @@ URL `https://epss.empiricalsecurity.com/epss_scores-current.csv.gz`, which redir
 | --- | --- | :---: | --- | --- |
 | req-vuln-mosaic-epss-1 | Header Kept | Implemented | The stored dataset facts carry the file's `model_version` and `score_date`. | |
 | req-vuln-mosaic-epss-2 | Invalid File Refused | Implemented | A file with a wrong header, an earlier `score_date`, or an out-of-range score on any row (first, last or middle) is refused and `current` is unchanged. | |
+| req-vuln-mosaic-epss-3 | Score Readable By Id | Implemented | `get_epss` returns the current score and percentile for a scored id, `not-scored` for an absent one, and `not-fetched` before any file is held. | |
 
 ### NVD API 2.0
 

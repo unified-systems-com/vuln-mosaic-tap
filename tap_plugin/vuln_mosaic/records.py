@@ -35,6 +35,36 @@ class Ssvc:
 
 
 @dataclass(frozen=True)
+class Reference:
+    url: str
+    tags: tuple[str, ...]  # e.g. vendor-advisory, patch, exploit, mailing-list; empty when the record gives none
+
+
+@dataclass(frozen=True)
+class AffectedVersion:
+    version: str | None
+    status: str | None
+    less_than: str | None
+    less_than_or_equal: str | None
+    version_type: str | None
+    changes: tuple[tuple[str | None, str | None], ...]  # (at, status) transitions inside the range
+
+
+@dataclass(frozen=True)
+class AffectedProduct:
+    vendor: str | None
+    product: str | None
+    package_name: str | None
+    default_status: str | None
+    cpes: tuple[str, ...]
+    versions: tuple[AffectedVersion, ...]
+    # Versions the record says are fixed or unaffected: an explicit "unaffected" entry, a "changes"
+    # transition to unaffected, or the "lessThan" bound of an affected range (the first version not
+    # affected). Order of appearance, duplicates removed. Empty means the record names none.
+    fixed_versions: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class ParsedRecord:
     cve_id: str | None
     state: str | None
@@ -45,6 +75,8 @@ class ParsedRecord:
     ssvc: Ssvc | None
     affected: tuple[dict[str, Any], ...] | None
     references: tuple[str, ...] | None
+    reference_details: tuple[Reference, ...] | None
+    affected_products: tuple[AffectedProduct, ...] | None
 
 
 def _as_dict(value: object) -> dict[str, Any]:
@@ -127,6 +159,59 @@ def _ssvc(container: dict[str, Any] | None) -> Ssvc | None:
     return None
 
 
+def _text(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _wildcardish(bound: str) -> bool:
+    # A "lessThan" such as "log4j-core*" names a package, not a version.
+    return "*" in bound or bound.lower() in {"unspecified", "n/a"}
+
+
+def _affected_product(entry: dict[str, Any]) -> AffectedProduct:
+    versions: list[AffectedVersion] = []
+    fixed: list[str] = []
+
+    def add_fixed(value: object) -> None:
+        text = _text(value)
+        if text and not _wildcardish(text) and text not in fixed:
+            fixed.append(text)
+
+    for raw in entry.get("versions", []) or []:
+        if not isinstance(raw, dict):
+            continue
+        changes = tuple(
+            (_text(c.get("at")), _text(c.get("status"))) for c in raw.get("changes", []) or [] if isinstance(c, dict)
+        )
+        versions.append(
+            AffectedVersion(
+                version=_text(raw.get("version")),
+                status=_text(raw.get("status")),
+                less_than=_text(raw.get("lessThan")),
+                less_than_or_equal=_text(raw.get("lessThanOrEqual")),
+                version_type=_text(raw.get("versionType")),
+                changes=changes,
+            )
+        )
+        if raw.get("status") == "unaffected":
+            add_fixed(raw.get("version"))
+        for at, status in changes:
+            if status == "unaffected":
+                add_fixed(at)
+        if raw.get("status") == "affected":
+            add_fixed(raw.get("lessThan"))
+    cpes = entry.get("cpes")
+    return AffectedProduct(
+        vendor=_text(entry.get("vendor")),
+        product=_text(entry.get("product")),
+        package_name=_text(entry.get("packageName")),
+        default_status=_text(entry.get("defaultStatus")),
+        cpes=tuple(c for c in cpes if isinstance(c, str)) if isinstance(cpes, list) else (),
+        versions=tuple(versions),
+        fixed_versions=tuple(fixed),
+    )
+
+
 def extract_record(record: dict[str, Any]) -> ParsedRecord:
     meta = _as_dict(record.get("cveMetadata"))
     containers = _as_dict(record.get("containers"))
@@ -168,5 +253,17 @@ def extract_record(record: dict[str, Any]) -> ParsedRecord:
             tuple(r["url"] for r in refs if isinstance(r, dict) and isinstance(r.get("url"), str))
             if isinstance(refs, list)
             else None
+        ),
+        reference_details=(
+            tuple(
+                Reference(r["url"], tuple(t for t in r.get("tags", []) or [] if isinstance(t, str)))
+                for r in refs
+                if isinstance(r, dict) and isinstance(r.get("url"), str)
+            )
+            if isinstance(refs, list)
+            else None
+        ),
+        affected_products=(
+            tuple(_affected_product(a) for a in affected if isinstance(a, dict)) if isinstance(affected, list) else None
         ),
     )

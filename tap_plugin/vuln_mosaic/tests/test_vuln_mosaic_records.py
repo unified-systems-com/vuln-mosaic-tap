@@ -78,3 +78,38 @@ def test_records_module_imports_only_the_standard_library() -> None:  # req-vuln
     )
     out = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True, check=True)
     assert out.stdout.strip() == "[]", out.stdout
+
+
+def test_reference_tags_are_parsed() -> None:  # records-5
+    record = parsed(LOG4SHELL)
+    tags = {t for ref in record.reference_details for t in ref.tags}
+    assert {"vendor-advisory", "mailing-list", "third-party-advisory"} <= tags
+    assert [r.url for r in record.reference_details] == list(record.references)
+    assert all(isinstance(r.tags, tuple) for r in record.reference_details)
+    assert parsed(CNA_ONLY).reference_details and all(r.tags == () for r in parsed(CNA_ONLY).reference_details)
+
+
+def test_reference_details_absent_is_none() -> None:
+    doc = json.loads(corpus(CNA_ONLY))
+    doc["containers"]["cna"].pop("references")
+    assert extract_record(doc).reference_details is None
+
+
+def test_fixed_versions_from_changes_and_less_than() -> None:  # records-6
+    log4j = parsed(LOG4SHELL).affected_products[0]
+    assert log4j.vendor == "Apache Software Foundation" and log4j.product == "Apache Log4j2"
+    assert log4j.fixed_versions == ("2.3.1", "2.12.2", "2.15.0")  # 'log4j-core*' is a package name, not a bound
+    snipe = parsed(CNA_ONLY).affected_products[0]
+    assert snipe.fixed_versions == ("5.3.6",) and snipe.versions[0].less_than == "5.3.6"
+
+
+def test_no_fix_named_gives_an_empty_tuple_not_none() -> None:
+    intel = parsed(PUBLISHED_SSVC).affected_products[0]
+    assert intel.fixed_versions == () and intel.versions[0].version == "See references"
+
+
+def test_explicit_unaffected_entry_is_a_fixed_version() -> None:
+    doc = {"containers": {"cna": {"affected": [{"vendor": "v", "product": "p", "versions": [
+        {"version": "1.0", "status": "affected"}, {"version": "1.1", "status": "unaffected"}]}]}}}
+    assert extract_record(doc).affected_products[0].fixed_versions == ("1.1",)
+    assert extract_record({"containers": {"cna": {}}}).affected_products is None
