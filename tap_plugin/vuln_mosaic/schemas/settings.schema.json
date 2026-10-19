@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "vuln_mosaic settings",
+  "description": "Operator choices for the vuln_mosaic collector. Lives at <home>/settings.json on the operator's filesystem; never read from the grid (req-vuln-mosaic-settings).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "sources": {
+      "description": "Per-source switches, keyed by source name. A source not listed keeps its default.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cvelist": {
+          "description": "CVE Record v5 records from the CVE Program's cvelistV5 repository.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "description": "Whether the refresh fetches this source. Default true.",
+              "type": "boolean"
+            },
+            "max_age_days": {
+              "description": "A dataset checked longer ago than this is stale. Default 3.",
+              "type": "integer",
+              "minimum": 1
+            },
+            "mode": {
+              "description": "wanted (default) holds only the ids consumers ask for; full holds every record (about 0.7 GB).",
+              "enum": [
+                "wanted",
+                "full"
+              ]
+            }
+          }
+        },
+        "kev": {
+          "description": "The CISA Known Exploited Vulnerabilities catalog, held as one file.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "description": "Whether the refresh fetches this source. Default true.",
+              "type": "boolean"
+            },
+            "max_age_days": {
+              "description": "A dataset checked longer ago than this is stale. Default 3.",
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "epss": {
+          "description": "The FIRST EPSS daily scores, held as one file.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "description": "Whether the refresh fetches this source. Default true.",
+              "type": "boolean"
+            },
+            "max_age_days": {
+              "description": "A dataset checked longer ago than this is stale. Default 3.",
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "nvd": {
+          "description": "NVD API 2.0 records for the wanted ids. Off by default.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "description": "Whether the refresh fetches this source. Default false.",
+              "type": "boolean"
+            },
+            "max_age_days": {
+              "description": "A dataset checked longer ago than this is stale. Default 3.",
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "osv": {
+          "description": "OSV advisories, one whole zip per ecosystem. Off by default; large (Wolfi 300 MB, Chainguard 1.07 GB, Ubuntu 777 MB), and every enabled ecosystem costs about twice its zip on disk because two builds are kept.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "description": "Whether the refresh fetches this source. Default false.",
+              "type": "boolean"
+            },
+            "max_age_days": {
+              "description": "A dataset checked longer ago than this is stale. Default 3.",
+              "type": "integer",
+              "minimum": 1
+            },
+            "ecosystems": {
+              "description": "Ecosystem names to hold, each of which must also appear in the bucket's ecosystems.txt. A name becomes a directory name, so it is restricted here.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9 ._:-]{0,63}$"
+              },
+              "uniqueItems": true
+            }
+          }
+        }
+      }
+    },
+    "immediate_fetch": {
+      "description": "When true, a read that misses fetches the record inside the call (10 s budget) instead of only queueing it. Default false.",
+      "type": "boolean"
+    },
+    "mirror": {
+      "description": "Per-source directory holding an operator-supplied artifact and its manifest.json. A source with a mirror makes no network connection (req-vuln-mosaic-mirror).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cvelist": {
+          "description": "Directory holding a git bundle and manifest.json.",
+          "type": "string",
+          "minLength": 1
+        },
+        "kev": {
+          "description": "Directory holding the catalog file and manifest.json.",
+          "type": "string",
+          "minLength": 1
+        },
+        "epss": {
+          "description": "Directory holding the scores file and manifest.json.",
+          "type": "string",
+          "minLength": 1
+        },
+        "nvd": {
+          "description": "Directory holding a JSON export of the stored records and manifest.json.",
+          "type": "string",
+          "minLength": 1
+        },
+        "osv": {
+          "description": "Directory holding one zip per ecosystem, each with its manifest.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}
