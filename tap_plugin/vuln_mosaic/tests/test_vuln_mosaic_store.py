@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import gzip
 import json
-import multiprocessing
 import os
+import subprocess
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -157,23 +158,23 @@ def test_settings_module_has_no_grid_import() -> None:  # settings-3
     assert "django" not in src and "tap_grid" not in src and "tap_cares" not in src
 
 
-def _hold(home: str, ready, release) -> None:  # noqa: ANN001
-    with writer_lock(Path(home)):
-        ready.set()
-        release.wait(10)
-
-
 def test_lock_blocks_across_processes(home: Path) -> None:
-    ctx = multiprocessing.get_context("spawn")
-    ready, release = ctx.Event(), ctx.Event()
-    proc = ctx.Process(target=_hold, args=(str(home), ready, release))
-    proc.start()
+    code = (
+        "import sys, time\n"
+        "from pathlib import Path\n"
+        "from tap_plugin.vuln_mosaic.locking import writer_lock\n"
+        "with writer_lock(Path(sys.argv[1])):\n"
+        "    print('held', flush=True)\n"
+        "    sys.stdin.readline()\n"
+    )
+    proc = subprocess.Popen([sys.executable, "-I", "-c", code, str(home)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
     try:
-        assert ready.wait(20)
+        assert proc.stdout.readline().strip() == "held"
         with pytest.raises(LockBusy):
             with writer_lock(home):
                 pass
     finally:
-        release.set()
-        proc.join(10)
+        proc.communicate("\n", timeout=30)
+    with writer_lock(home):  # released once the holder exits
+        pass
     assert os.path.exists(home / ".lock")

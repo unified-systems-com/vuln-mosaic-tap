@@ -6,6 +6,7 @@ Every test runs with outbound sockets blocked (req-vuln-mosaic-corpus-2). Git fi
 
 from __future__ import annotations
 
+import faulthandler
 import io
 import socket
 import subprocess
@@ -32,6 +33,15 @@ LOG4SHELL = "CVE-2021-44228"
 
 def corpus(cve_id: str) -> bytes:
     return (CORPUS / f"{cve_id}.json").read_bytes()
+
+
+@pytest.fixture(autouse=True)
+def stack_dump_if_hung():
+    """If a test stalls, print every thread's stack and exit, so a hung CI job leaves a log
+    instead of sitting until the runner's six-hour limit."""
+    faulthandler.dump_traceback_later(240, exit=True)
+    yield
+    faulthandler.cancel_dump_traceback_later()
 
 
 @pytest.fixture(autouse=True)
