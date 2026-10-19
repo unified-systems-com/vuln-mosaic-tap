@@ -195,7 +195,7 @@ Consumers tell the plugin which CVE ids matter by writing a plain file, and the 
 
 #### Implementation
 
-- **Batch path:** each consumer writes its own file `<home>/wanted/<consumer>.json`, one file per consumer so writers never race. The file validates against `tap_plugin/vuln_mosaic/schemas/wanted.schema.json` (a top-level `description` string and an `ids` array of strings matching `^CVE-[0-9]{4}-[0-9]{4,}$`, each with a described property). A file that fails validation is ignored for that run and named in the run's results; it never aborts the run.
+- **Batch path:** each consumer writes its own file `<home>/wanted/<consumer>.json`, one file per consumer so writers never race. `<consumer>` matches `^[a-z][a-z0-9_]{0,63}$` (a plugin slug); the collector ignores, and names in its run record, any file in `wanted/` whose name does not, and never builds a path from an unvalidated name. The file validates against `tap_plugin/vuln_mosaic/schemas/wanted.schema.json` (a top-level `description` string and an `ids` array of strings matching `^CVE-[0-9]{4}-[0-9]{4,}$`, each with a described property). A file that fails validation is ignored for that run and named in the run's results; it never aborts the run.
 - **Spool path:** a read that misses (`req-vuln-mosaic-lookup`) creates `<home>/spool/<CVE-id>` with `O_CREAT | O_EXCL`, so concurrent requests for one id are one file. The collector ingests each spool file into the `wanted` table of the store, fetches the record, and deletes the file. Ids added this way stay wanted and are refreshed with the rest; v0 does not prune the set (its size is bounded by the ids ever asked about).
 - **Wanted set** for a run is the union of every valid `wanted/*.json` file, the `wanted` table, and every id already held in the store. A record once stored is therefore refreshed on every run until the operator prunes it, so a consumer dropping an id from its file cannot leave an old copy reading as fresh. Pruning is an operator act and removes the row from `records` as well.
 - **Modes:** `wanted` (default) fetches and refreshes only the wanted set; `full` is `settings.sources.cvelist.mode = "full"` and fetches every record. The mode applies to `cvelist`; `nvd` is always wanted-ids.
@@ -210,6 +210,7 @@ Consumers tell the plugin which CVE ids matter by writing a plain file, and the 
 | req-vuln-mosaic-wanted-3 | Spool Is Idempotent | Proposed | Two requests for one id leave one spool file, and a fetched id is deleted from the spool and added to `wanted`. | |
 | req-vuln-mosaic-wanted-4 | No Consumer Vocabulary | Proposed | The package imports no other plugin; a test fails if `tap_plugin.*` other than its own is imported. | |
 | req-vuln-mosaic-wanted-5 | Held Records Stay Fresh | Proposed | A record already stored is refreshed on a later run although no wanted file lists its id any more. | |
+| req-vuln-mosaic-wanted-6 | Consumer Name Validated | Proposed | A file named `../x.json` or `A B.json` in `wanted/` is ignored and named in the run record, and no path outside `wanted/` is opened. | |
 
 ### The Read Function
 
