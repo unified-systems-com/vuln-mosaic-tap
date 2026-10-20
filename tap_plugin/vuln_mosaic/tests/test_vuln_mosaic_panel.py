@@ -247,13 +247,18 @@ def test_lookup_module_still_free_of_django() -> None:
     assert "django" not in open(lookup.__file__).read()
 
 
-def test_stylesheet_is_theme_aware_with_the_stat_card_palette() -> None:  # panel-cve-7
+def test_stylesheet_follows_the_page_theme_not_the_os() -> None:  # panel-cve-7
     from pathlib import Path
 
     import tap_plugin.vuln_mosaic.panels.cve as mod
 
     css = (Path(mod.__file__).parents[2] / "static" / "vuln_mosaic" / "css" / "cve.css").read_text()
-    assert ':root[data-theme="dark"] .tap-panel--vmcve' in css and "prefers-color-scheme: dark" in css
-    assert ':root:not([data-theme="light"]) .tap-panel--vmcve' in css
+    # The OS can be dark while the platform page is light; a prefers-color-scheme rule painted light text on
+    # that light page (v0.3.0). Only the platform's own data-theme switches the tone colours.
+    assert "prefers-color-scheme" not in css.replace("There is deliberately no prefers-color-scheme rule", "")
+    assert ':root[data-theme="dark"] .tap-panel--vmcve' in css
+    # Loose text must not be given a colour of the panel's own: it inherits the page's.
+    root_rule = css[css.index(".tap-panel--vmcve {"):css.index("}", css.index(".tap-panel--vmcve {"))]
+    assert "\n  color:" not in root_rule and "currentColor" in root_rule
     for token, light, dark in (("--vmcve-bad", "#b91c1c", "#f87171"), ("--vmcve-warn", "#b45309", "#fbbf24"), ("--vmcve-neutral", "#94a3b8", "#64748b")):
         assert f"{token}: {light}" in css and f"{token}: {dark}" in css

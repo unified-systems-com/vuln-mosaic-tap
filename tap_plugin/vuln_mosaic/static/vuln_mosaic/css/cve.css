@@ -2,43 +2,27 @@
    (tap_web/static/tap_web/css/stat-cards.css): bad red (KEV, critical/high), warn yellow (medium, stale),
    neutral grey (zero, low, not listed). Tone is a left rule AND a word, never colour alone. */
 
+/* Theming. The panel follows the PAGE, not the viewer's OS: loose text inherits the page's colour, and
+   surfaces, rules and muted text are tints of that colour, so the panel reads on a light page and on a dark
+   one without knowing which it is on. Only the four tone colours change, and only under the platform's
+   explicit [data-theme="dark"]. There is deliberately no prefers-color-scheme rule: the OS can be dark
+   while the page is light, which painted light text on a light page. */
 .tap-panel--vmcve {
-  --vmcve-bg: #ffffff;
-  --vmcve-border: #e2e8f0;
-  --vmcve-text: #0f172a;
-  --vmcve-muted: #64748b;
+  --vmcve-bg: color-mix(in srgb, currentColor 5%, transparent);
+  --vmcve-border: color-mix(in srgb, currentColor 22%, transparent);
+  --vmcve-muted: color-mix(in srgb, currentColor 68%, transparent);
+  --vmcve-chip: color-mix(in srgb, currentColor 9%, transparent);
   --vmcve-good: #15803d;
   --vmcve-warn: #b45309;
   --vmcve-bad: #b91c1c;
   --vmcve-neutral: #94a3b8;
-  --vmcve-chip: #f1f5f9;
-  color: var(--vmcve-text);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .tap-panel--vmcve {
-    --vmcve-bg: #1e293b;
-    --vmcve-border: #334155;
-    --vmcve-text: #f1f5f9;
-    --vmcve-muted: #94a3b8;
-    --vmcve-good: #4ade80;
-    --vmcve-warn: #fbbf24;
-    --vmcve-bad: #f87171;
-    --vmcve-neutral: #64748b;
-    --vmcve-chip: #0f172a;
-  }
 }
 
 :root[data-theme="dark"] .tap-panel--vmcve {
-  --vmcve-bg: #1e293b;
-  --vmcve-border: #334155;
-  --vmcve-text: #f1f5f9;
-  --vmcve-muted: #94a3b8;
   --vmcve-good: #4ade80;
   --vmcve-warn: #fbbf24;
   --vmcve-bad: #f87171;
   --vmcve-neutral: #64748b;
-  --vmcve-chip: #0f172a;
 }
 
 .vmcve__head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin-bottom: 0.75rem; }
