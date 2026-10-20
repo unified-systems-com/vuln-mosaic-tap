@@ -9,6 +9,7 @@
 
     {% else %}
     <article class="vmcve">
+        {% if show.header %}
         <header class="vmcve__head">
             <h3 class="vmcve__id">{{ requested }}</h3>
             {% if state == "cve" %}
@@ -21,6 +22,7 @@
                 {% for link in links %}<li><a href="{{ link.url }}" target="_blank" rel="noopener noreferrer">{{ link.label }}</a></li>{% endfor %}
             </ul>
         </header>
+        {% endif %}
 
         {% if state == "ghsa_only" %}
         <p class="vmcve-empty">GitHub advisory only. The local CVE datasets hold records for CVE ids.</p>
@@ -32,6 +34,7 @@
         <p class="vmcve-empty">{% if queued %}Queued for the next refresh. {% endif %}Not observed yet.</p>
         {% endif %}
 
+        {% if show.cards %}
         <div class="vmcve__grid">
             {# KEV: red when listed, grey when not, muted when no catalog is held #}
             <section class="vmcve-card vmcve-card--{% if kev.state == 'listed' %}bad{% elif kev.state == 'not-listed' %}neutral{% else %}muted{% endif %}">
@@ -92,8 +95,10 @@
             {% endif %}
             {% endif %}
         </div>
+        {% endif %}
 
         {% if record_state == "found" %}
+        {% if show.cvss %}
         <section class="vmcve-section">
             <h4>CVSS</h4>
             {% if cvss %}
@@ -108,9 +113,29 @@
             </ul>
             {% elif cvss is None %}<p class="vmcve-absent">Not observed</p>{% else %}<p class="vmcve-absent">None in the record</p>{% endif %}
         </section>
+        {% endif %}
 
+        {% if show.cvss_breakdown %}
+        <section class="vmcve-section vmcve-breakdown">
+            <h4>How it can be attacked</h4>
+            {% if breakdown %}
+            <p class="vmcve-breakdown__src">{{ breakdown.source }}</p>
+            <table class="vmcve-table">
+                <thead><tr><th>Metric</th><th>Value</th><th>What it means</th></tr></thead>
+                <tbody>
+                {% for r in breakdown.rows %}
+                <tr><td>{{ r.name }}</td><td><span class="vmcve-chip" title="{{ r.key }}:{{ r.code }}">{{ r.label }}</span></td><td>{{ r.meaning }}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% elif cvss is None %}<p class="vmcve-absent">Not observed</p>{% else %}<p class="vmcve-absent">None in the record</p>{% endif %}
+        </section>
+        {% endif %}
+
+        {% if show.affected %}
         <section class="vmcve-section">
             <h4>Affected products</h4>
+            <p class="vmcve-note">{{ affected_note }}</p>
             {% if products %}
             <table class="vmcve-table">
                 <thead><tr><th>Vendor</th><th>Product</th><th>Affected ranges</th><th>Fixed in</th></tr></thead>
@@ -127,7 +152,9 @@
             </table>
             {% else %}<p class="vmcve-absent">None in the record</p>{% endif %}
         </section>
+        {% endif %}
 
+        {% if show.references %}
         <section class="vmcve-section">
             <h4>References</h4>
             {% for group in references %}
@@ -141,7 +168,9 @@
             {% empty %}<p class="vmcve-absent">None in the record</p>{% endfor %}
         </section>
         {% endif %}
+        {% endif %}
 
+        {% if show.freshness %}
         <footer class="vmcve-datasets">
             <table class="vmcve-table vmcve-table--compact">
                 <thead><tr><th>Dataset</th><th>As of</th><th>Checked</th><th>Version</th><th>Freshness</th></tr></thead>
@@ -158,6 +187,7 @@
                 </tbody>
             </table>
         </footer>
+        {% endif %}
         {% endif %}
     </article>
     {% endif %}
