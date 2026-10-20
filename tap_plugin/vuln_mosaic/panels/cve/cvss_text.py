@@ -138,6 +138,14 @@ V4: dict[str, tuple[str, dict[str, tuple[str, str]]]] = {
     }),
 }
 
+# Optional metrics (v3 temporal and environmental, v4 threat, environmental and supplemental): published as ``X``
+# they mean "not defined" and are skipped as noise; with a defined value they are shown as their raw code.
+OPTIONAL_V3 = frozenset({"E", "RL", "RC", "CR", "IR", "AR", "MAV", "MAC", "MPR", "MUI", "MS", "MC", "MI", "MA"})
+OPTIONAL_V4 = frozenset({
+    "E", "CR", "IR", "AR", "MAV", "MAC", "MAT", "MPR", "MUI", "MVC", "MVI", "MVA", "MSC", "MSI", "MSA",
+    "S", "AU", "R", "V", "RE", "U",
+})
+OPTIONAL = {"2.0": frozenset(), "3.0": OPTIONAL_V3, "3.1": OPTIONAL_V3, "4.0": OPTIONAL_V4}
 TABLES = {"2.0": V2, "3.0": V3, "3.1": V3, "4.0": V4}
 AFFECTED_NOTE = "Versions in these ranges are affected; upgrade to a fixed-in version."
 UNRECOGNISED = "Not in this panel's glossary; shown as published."
@@ -157,12 +165,13 @@ def explain_vector(vector: str | None, declared_version: str | None = None) -> l
     """One row per metric: ``{key, name, code, label, meaning, known}``. Never raises, never blank.
 
     Metrics come out in the vector's own order. A key the version's table does not define is listed with its raw
-    code, except the v4 threat and environmental metrics published as ``X`` (not defined), which are skipped as
-    noise. A known key with an unknown value keeps the raw value as its label.
+    code, except an optional metric published as ``X`` (not defined), which is skipped as noise. A known key with
+    an unknown value keeps the raw value as its label.
     """
     if not isinstance(vector, str) or not vector.strip():
         return []
-    table = TABLES.get(vector_version(vector, declared_version) or "", {})
+    version = vector_version(vector, declared_version) or ""
+    table, optional = TABLES.get(version, {}), OPTIONAL.get(version, frozenset())
     rows: list[dict[str, Any]] = []
     for part in vector.split("/"):
         key, sep, code = part.partition(":")
@@ -172,6 +181,6 @@ def explain_vector(vector: str | None, declared_version: str | None = None) -> l
             name, values = table[key]
             label, meaning = values.get(code, (code, UNRECOGNISED))
             rows.append({"key": key, "name": name, "code": code, "label": label, "meaning": meaning, "known": code in values})
-        elif code != "X":
+        elif not (code == "X" and key in optional):
             rows.append({"key": key, "name": key, "code": code, "label": code, "meaning": UNRECOGNISED, "known": False})
     return rows

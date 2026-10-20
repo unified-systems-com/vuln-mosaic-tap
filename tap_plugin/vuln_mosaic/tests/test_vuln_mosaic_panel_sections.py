@@ -1,4 +1,4 @@
-"""CVE panel sections and the CVSS plain-English table (req-vuln-mosaic-panel-cve-8, -9). Local datasets only."""
+"""CVE panel sections and the CVSS plain-English table (req-vuln-mosaic-panel-cve-9, -9). Local datasets only."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ def by_key(rows):
 # --- the constants ---------------------------------------------------------------------------------
 
 
-def test_v3_vector_is_spelled_out_in_the_vectors_own_order() -> None:  # panel-cve-9
+def test_v3_vector_is_spelled_out_in_the_vectors_own_order() -> None:  # panel-cve-10
     rows = explain_vector(V31)
     assert [r["key"] for r in rows] == ["AV", "AC", "PR", "UI", "S", "C", "I", "A"]
     got = by_key(rows)
@@ -35,13 +35,13 @@ def test_v3_vector_is_spelled_out_in_the_vectors_own_order() -> None:  # panel-c
     assert all(r["known"] and r["meaning"] for r in rows)
 
 
-def test_version_comes_from_the_vector_then_from_the_declared_version() -> None:  # panel-cve-9
+def test_version_comes_from_the_vector_then_from_the_declared_version() -> None:  # panel-cve-10
     assert vector_version(V31) == "3.1" and vector_version("CVSS:3.0/AV:N") == "3.0" and vector_version(V4) == "4.0"
     assert vector_version(V2) == "2.0"
     assert vector_version("AV:N/AC:L", "2") == "2.0"
 
 
-def test_v2_and_v4_vectors_are_spelled_out() -> None:  # panel-cve-9
+def test_v2_and_v4_vectors_are_spelled_out() -> None:  # panel-cve-10
     v2 = by_key(explain_vector(V2))
     assert (v2["Au"]["name"], v2["Au"]["label"]) == ("Authentication", "None")
     assert (v2["C"]["label"], v2["A"]["label"]) == ("Partial", "Partial")
@@ -51,25 +51,46 @@ def test_v2_and_v4_vectors_are_spelled_out() -> None:  # panel-cve-9
     assert v4["SC"]["name"] == "Confidentiality impact (other systems)"
 
 
-def test_v4_threat_and_environmental_metrics_that_are_not_defined_are_skipped() -> None:  # panel-cve-9
+def test_v4_threat_and_environmental_metrics_that_are_not_defined_are_skipped() -> None:  # panel-cve-10
     keys = [r["key"] for r in explain_vector(V4)]
     assert keys == ["AV", "AC", "AT", "PR", "UI", "VC", "VI", "VA", "SC", "SI", "SA"]
 
 
-def test_unknown_metric_or_value_shows_the_raw_code_and_never_throws() -> None:  # panel-cve-9
+def test_unknown_metric_or_value_shows_the_raw_code_and_never_throws() -> None:  # panel-cve-10
     rows = by_key(explain_vector("CVSS:3.1/AV:Z/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/ZZ:9"))
     assert (rows["AV"]["label"], rows["AV"]["known"]) == ("Z", False) and rows["AV"]["meaning"]
     assert (rows["ZZ"]["name"], rows["ZZ"]["label"], rows["ZZ"]["known"]) == ("ZZ", "9", False)
     assert rows["AC"]["known"] is True
 
 
+def test_x_is_skipped_only_for_optional_metrics_and_defined_optional_values_show_raw() -> None:  # panel-cve-10
+    got = by_key(explain_vector("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/ZZ:X/E:X/RL:O"))
+    assert "ZZ" in got and got["ZZ"]["label"] == "X" and "E" not in got
+    assert got["RL"]["label"] == "O" and got["RL"]["known"] is False
+    v4 = by_key(explain_vector("CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N/E:A/CR:X/MAV:N"))
+    assert v4["E"]["label"] == "A" and v4["MAV"]["label"] == "N" and "CR" not in v4
+
+
+def test_a_non_numeric_stored_score_reads_as_unscored_not_an_error(vm_home) -> None:  # panel-cve-10
+    record = json.loads(corpus(LOG4SHELL))
+    for container in [record["containers"]["cna"], *record["containers"].get("adp", [])]:
+        for metric in container.get("metrics", []):
+            for body in metric.values():
+                if isinstance(body, dict) and "baseScore" in body:
+                    body["baseScore"] = "not-a-number"
+    seed(vm_home, LOG4SHELL, json.dumps(record).encode())
+    ctx, html = render(f"vuln_id={LOG4SHELL}")  # the default layout must not regress either
+    assert ctx["state"] == "cve" and "<h4>CVSS</h4>" in html
+    assert "unscored" in render(f"vuln_id={LOG4SHELL}", {"sections": ["cvss_breakdown"]})[1]
+
+
 @pytest.mark.parametrize("vector", [None, "", "   ", "not a vector", "CVSS:", "CVSS:9.9/AV:N", "/", ":::", "AV:", "CVSS:3.1/", "\x00:\x00", "A" * 5000])
-def test_garbage_never_raises_and_never_returns_a_blank_row(vector) -> None:  # panel-cve-9
+def test_garbage_never_raises_and_never_returns_a_blank_row(vector) -> None:  # panel-cve-10
     for row in explain_vector(vector):
         assert row["key"] and row["code"] and row["label"] and row["meaning"]
 
 
-def test_every_table_entry_has_a_name_and_text_for_every_value() -> None:  # panel-cve-9
+def test_every_table_entry_has_a_name_and_text_for_every_value() -> None:  # panel-cve-10
     for table in TABLES.values():
         for name, values in table.values():
             assert name and values
@@ -79,7 +100,7 @@ def test_every_table_entry_has_a_name_and_text_for_every_value() -> None:  # pan
 # --- the sections config ---------------------------------------------------------------------------
 
 
-def test_default_layout_is_unchanged_and_the_breakdown_is_opt_in(vm_home) -> None:  # panel-cve-8
+def test_default_layout_is_unchanged_and_the_breakdown_is_opt_in(vm_home) -> None:  # panel-cve-9
     assert "cvss_breakdown" not in DEFAULT_SECTIONS and set(DEFAULT_SECTIONS) < set(SECTIONS)
     seed(vm_home)
     ctx, html = render(f"vuln_id={LOG4SHELL}")
@@ -89,7 +110,7 @@ def test_default_layout_is_unchanged_and_the_breakdown_is_opt_in(vm_home) -> Non
     assert "How it can be attacked" not in html
 
 
-def test_only_the_chosen_sections_render(vm_home) -> None:  # panel-cve-8
+def test_only_the_chosen_sections_render(vm_home) -> None:  # panel-cve-9
     seed(vm_home)
     _, html = render(f"vuln_id={LOG4SHELL}", {"sections": ["cvss_breakdown", "affected", "references", "freshness"]})
     assert "How it can be attacked" in html and "Affected products" in html and "References" in html and "vmcve-datasets" in html
@@ -99,7 +120,7 @@ def test_only_the_chosen_sections_render(vm_home) -> None:  # panel-cve-8
     assert "vmcve-datasets" not in only
 
 
-def test_the_array_order_does_not_change_the_page_order(vm_home) -> None:  # panel-cve-8
+def test_the_array_order_does_not_change_the_page_order(vm_home) -> None:  # panel-cve-9
     seed(vm_home)
     _, a = render(f"vuln_id={LOG4SHELL}", {"sections": ["freshness", "affected", "cvss_breakdown"]})
     _, b = render(f"vuln_id={LOG4SHELL}", {"sections": ["cvss_breakdown", "affected", "freshness"]})
@@ -108,7 +129,7 @@ def test_the_array_order_does_not_change_the_page_order(vm_home) -> None:  # pan
 
 
 @pytest.mark.parametrize("sections", [["nope"], [], ["cvss", "cvss"], "cvss", [1]])
-def test_a_bad_sections_value_is_a_bad_config_not_a_crash(sections) -> None:  # panel-cve-8
+def test_a_bad_sections_value_is_a_bad_config_not_a_crash(sections) -> None:  # panel-cve-9
     ctx, html = render(f"vuln_id={LOG4SHELL}", {"sections": sections})
     assert ctx["state"] == "bad_config" and "Panel config invalid" in html
 
@@ -116,7 +137,7 @@ def test_a_bad_sections_value_is_a_bad_config_not_a_crash(sections) -> None:  # 
 # --- the breakdown --------------------------------------------------------------------------------
 
 
-def test_breakdown_has_the_source_line_and_one_row_per_metric(vm_home) -> None:  # panel-cve-9
+def test_breakdown_has_the_source_line_and_one_row_per_metric(vm_home) -> None:  # panel-cve-10
     seed(vm_home)
     ctx, html = render(f"vuln_id={LOG4SHELL}", {"sections": ["cvss_breakdown"]})
     breakdown = ctx["breakdown"]
@@ -126,7 +147,7 @@ def test_breakdown_has_the_source_line_and_one_row_per_metric(vm_home) -> None: 
     assert html.count("<tr><td>") == 8
 
 
-def test_breakdown_says_so_when_the_record_has_no_cvss(vm_home) -> None:  # panel-cve-9
+def test_breakdown_says_so_when_the_record_has_no_cvss(vm_home) -> None:  # panel-cve-10
     record = json.loads(corpus(LOG4SHELL))
     for container in [record["containers"]["cna"], *record["containers"].get("adp", [])]:
         container.pop("metrics", None)
@@ -135,14 +156,14 @@ def test_breakdown_says_so_when_the_record_has_no_cvss(vm_home) -> None:  # pane
     assert ctx["breakdown"] is None and "None in the record" in html and "<tr><td>" not in html
 
 
-def test_the_affected_note_is_one_plain_line(vm_home) -> None:  # panel-cve-8
+def test_the_affected_note_is_one_plain_line(vm_home) -> None:  # panel-cve-9
     assert AFFECTED_NOTE == "Versions in these ranges are affected; upgrade to a fixed-in version."
     seed(vm_home)
     _, html = render(f"vuln_id={LOG4SHELL}", {"sections": ["affected"]})
     assert f'<p class="vmcve-note">{AFFECTED_NOTE}</p>' in html
 
 
-def test_meaning_text_is_escaped_not_trusted(vm_home) -> None:  # panel-cve-9
+def test_meaning_text_is_escaped_not_trusted(vm_home) -> None:  # panel-cve-10
     record = json.loads(corpus(LOG4SHELL))
     for container in [record["containers"]["cna"], *record["containers"].get("adp", [])]:
         for metric in container.get("metrics", []):

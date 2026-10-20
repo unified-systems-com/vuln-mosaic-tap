@@ -191,7 +191,10 @@ def _breakdown(cvss_rows: list[dict[str, Any]]) -> dict[str, Any] | None:
     rows = explain_vector(row["vector"], row["version"])
     if not rows:
         return None
-    score = "unscored" if row["score"] is None else f"{float(row['score']):.1f}" + (f" {str(row['severity']).title()}" if row["severity"] else "")
+    try:
+        score = "unscored" if row["score"] is None else f"{float(row['score']):.1f}" + (f" {str(row['severity']).title()}" if row["severity"] else "")
+    except (TypeError, ValueError):  # a stored score that is not a number reads as unscored, never as an error
+        score = "unscored"
     return {"source": f"Scored by {row['container']}, CVSS {row['version']} \u00b7 {score}", "rows": rows}
 
 
