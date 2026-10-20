@@ -88,3 +88,6 @@
 .vmcve-refs ul { list-style: none; margin: 0.15rem 0 0; padding: 0; font-size: 0.8rem; overflow-wrap: anywhere; }
 .vmcve-refs__more { color: var(--vmcve-muted); }
 .vmcve-datasets { margin-top: 0.75rem; }
+
+.vmcve-note, .vmcve-breakdown__src { margin: 0 0 0.4rem; font-size: 0.82rem; color: var(--vmcve-muted); }
+.vmcve-breakdown .vmcve-table td:first-child { white-space: nowrap; padding-right: 1rem; }

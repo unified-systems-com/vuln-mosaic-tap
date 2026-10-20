@@ -26,6 +26,7 @@ import jsonschema
 
 from tap_plugin.vuln_mosaic.ids import CVE_ID_RE
 from tap_plugin.vuln_mosaic.lookup import get_cve, get_epss, get_kev
+from tap_plugin.vuln_mosaic.panels.cve.cvss_text import AFFECTED_NOTE, explain_vector
 from tap_plugin.vuln_mosaic.records import extract_record
 
 if TYPE_CHECKING:
@@ -36,6 +37,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 DEFAULT_VULN_VAR = "vuln_id"
+# Render order is fixed; the ``sections`` config chooses which of these appear. Absent means all of them.
+SECTIONS = ("header", "cards", "cvss", "cvss_breakdown", "affected", "references", "freshness")
+DEFAULT_SECTIONS = ("header", "cards", "cvss", "affected", "references", "freshness")
 GHSA_RE = re.compile(r"^GHSA(-[2-9cfghjmpqrvwx]{4}){3}$")
 
 CVE_PANEL_CONFIG_SCHEMA: dict[str, Any] = {
@@ -61,6 +65,18 @@ CVE_PANEL_CONFIG_SCHEMA: dict[str, Any] = {
                 "small file per distinct id (bounded). False makes the panel purely read-only."
             ),
             "type": "boolean",
+        },
+        "sections": {
+            "description": (
+                "Which sections render, from header, cards, cvss, cvss_breakdown, affected, references and "
+                "freshness. The page order is fixed, not the order given. Absent means header, cards, cvss, "
+                "affected, references and freshness (cvss_breakdown, the plain-English table of the primary "
+                "CVSS metric, is opt-in)."
+            ),
+            "type": "array",
+            "items": {"description": "One section name.", "enum": list(SECTIONS)},
+            "uniqueItems": True,
+            "minItems": 1,
         },
         "max_references_per_tag": {
             "description": "How many reference links to list under each tag before the rest are counted. Default 8.",
@@ -167,6 +183,21 @@ def _cvss_rows(parsed: Any) -> list[dict[str, Any]]:
     return rows
 
 
+def _breakdown(cvss_rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The plain-English table for the primary CVSS metric (the first one when none is marked primary)."""
+    if not cvss_rows:
+        return None
+    row = next((r for r in cvss_rows if r["primary"]), cvss_rows[0])
+    rows = explain_vector(row["vector"], row["version"])
+    if not rows:
+        return None
+    try:
+        score = "unscored" if row["score"] is None else f"{float(row['score']):.1f}" + (f" {str(row['severity']).title()}" if row["severity"] else "")
+    except (TypeError, ValueError):  # a stored score that is not a number reads as unscored, never as an error
+        score = "unscored"
+    return {"source": f"Scored by {row['container']}, CVSS {row['version']} \u00b7 {score}", "rows": rows}
+
+
 def _references(parsed: Any, per_tag: int) -> list[dict[str, Any]]:
     groups: dict[str, list[str]] = {}
     for ref in parsed.reference_details or ():
@@ -211,12 +242,16 @@ class VulnMosaicCvePanelType:
             jsonschema.validate(config, CVE_PANEL_CONFIG_SCHEMA)
         except jsonschema.ValidationError as exc:
             return {"state": "bad_config", "detail": exc.message, "requested": ""}
+        chosen = config.get("sections") or DEFAULT_SECTIONS
+        show = {name: name in chosen for name in SECTIONS}
         var = config.get("vuln_id_var") or DEFAULT_VULN_VAR
         requested = (request.GET.get(var) or "").strip() if request else ""
         if not requested:
-            return {"state": "no_selection", "requested": ""}
+            return {"state": "no_selection", "requested": "", "show": show}
         kind = classify(requested)
         context: dict[str, Any] = {
+            "show": show,
+            "affected_note": AFFECTED_NOTE,
             "requested": requested,
             "kind": kind,
             "links": external_links(requested, kind),
@@ -248,8 +283,10 @@ class VulnMosaicCvePanelType:
             if record.state == "found" and record.record is not None:
                 parsed = extract_record(record.record)
                 ssvc = parsed.ssvc
+                cvss_rows = _cvss_rows(parsed)
                 out.update(
-                    cvss=_cvss_rows(parsed),
+                    cvss=cvss_rows,
+                    breakdown=_breakdown(cvss_rows),
                     cwes=list(parsed.cwes) if parsed.cwes is not None else None,
                     ssvc=ssvc,
                     published=parsed.date_published,
