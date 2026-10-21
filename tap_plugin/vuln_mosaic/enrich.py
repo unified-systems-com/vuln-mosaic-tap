@@ -138,15 +138,12 @@ def _kev_facts(cve_id: str, home: Path | None, facts: Facts) -> None:
 
 def _epss_facts(cve_id: str, home: Path | None, facts: Facts) -> None:
     epss = get_epss(cve_id, home=home)
-    if epss.state != SCORED or epss.dataset.stale is not False or epss.epss is None:
-        return
+    if epss.state != SCORED or epss.dataset.stale is not False or epss.epss is None or epss.percentile is None:
+        return  # the group is written whole: a score without its percentile would leave a mixed observation
     day = _day(epss.score_date)
     if day is None:
         return  # an undated score cannot be compared with the node's, so it is not written
-    values: dict[str, Any] = {"epss_score": epss.epss, "epss_date": day}
-    if epss.percentile is not None:
-        values["epss_percentile"] = epss.percentile
-    facts.values.update(values)
+    facts.values.update({"epss_score": epss.epss, "epss_percentile": epss.percentile, "epss_date": day})
 
 
 def _advisory_facts(ghsa_id: str, home: Path | None, facts: Facts) -> None:
@@ -223,7 +220,7 @@ def plan_patch(current: Mapping[str, Any], facts: Mapping[str, Any]) -> dict[str
             group.update({name: None for name in KEV_GROUP if name != "kev" and name not in group})
         if any(current.get(name) != value for name, value in group.items()):
             patch.update(group)
-    if "epss_score" in facts and _group_may_move(current, EPSS_GROUP, "epss_date", facts.get("epss_date")):
+    if all(name in facts for name in EPSS_GROUP) and _group_may_move(current, EPSS_GROUP, "epss_date", facts.get("epss_date")):
         group = {name: facts[name] for name in EPSS_GROUP if name in facts}
         if any(current.get(name) != value for name, value in group.items()):
             patch.update(group)

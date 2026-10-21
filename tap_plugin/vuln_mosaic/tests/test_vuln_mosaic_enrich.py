@@ -378,6 +378,25 @@ def test_a_write_phase_that_fails_outright_makes_the_run_not_clean(home, upstrea
     assert not report.clean and report.failed_sources == [] and "grid write failed" in report.summary()
 
 
+def test_a_broken_write_phase_fails_the_collector_job(monkeypatch) -> None:  # enrich-7
+    from tap_plugin.vuln_mosaic.collectors.refresh import collector as mod
+    from tap_plugin.vuln_mosaic.outcome import RunReport
+
+    report = RunReport(enrich=EnrichResult(raised=True, problems=["grid write: RuntimeError: no"]))
+    monkeypatch.setattr(mod, "run_refresh", lambda **_: report)
+    instance = mod.VulnMosaicRefreshCollector.__new__(mod.VulnMosaicRefreshCollector)
+    instance.results = {"info": [], "warn": [], "error": []}
+    instance._produced_batches, instance._surfaces, instance._surfaces_declared, instance.summary = [], [], False, ""
+    with pytest.raises(mod.VulnMosaicRefreshError, match="grid write failed"):
+        instance.run()
+    assert any(e["message_code"] == "GRID_WRITE_FAILED" for e in instance.results["error"])
+
+
+def test_a_newer_epss_score_without_a_percentile_is_not_written_as_a_mixed_group(home) -> None:  # enrich-3
+    held = {**EMPTY, "epss_score": 0.1, "epss_percentile": 0.9, "epss_date": "2026-01-01"}
+    assert plan_patch(held, {"epss_score": 0.2, "epss_date": "2026-02-01"}) == {}
+
+
 def test_one_refused_node_is_not_a_broken_write_phase() -> None:  # enrich-6
     assert not EnrichResult(patched=4, failed=1).broken
     assert not EnrichResult(lists_deferred=3).broken, "a known limit of the grid is a warning, not a failure"

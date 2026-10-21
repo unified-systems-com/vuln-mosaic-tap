@@ -40,6 +40,7 @@ _SITE_WANTED_PROBLEM = "5f67"
 _SITE_FINISHED = "f2d3"
 _SITE_GRID_PROBLEM = "b3eb"
 _SITE_GRID_WRITE_PROBLEM = "a576"
+_SITE_GRID_WRITE_FAILED = "3e88"
 
 _HOSTS = {
     "cvelist": cvelist.HOSTS,
@@ -77,6 +78,8 @@ class VulnMosaicRefreshCollector(CollectorBase):
         if report.enrich is not None:
             for note in report.enrich.problems:
                 self.record_warn(_SITE_GRID_WRITE_PROBLEM, "GRID_WRITE_PROBLEM", note)
+            if report.enrich.broken:
+                self.record_error(_SITE_GRID_WRITE_FAILED, "GRID_WRITE_FAILED", "Enriching the vulnerability nodes failed outright; the sources were refreshed.")
         for outcome in report.outcomes:
             self._record_outcome(outcome)
         self.summary = report.summary()[:400]
