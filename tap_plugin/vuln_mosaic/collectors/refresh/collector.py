@@ -11,6 +11,7 @@ from __future__ import annotations
 import shutil
 from typing import Any
 
+from tap_plugin.vuln_mosaic.collectors.refresh.gridread import read_grid_ids
 from tap_plugin.vuln_mosaic.home import resolve_home
 from tap_plugin.vuln_mosaic.locking import LockBusy
 from tap_plugin.vuln_mosaic.outcome import RunReport, SourceOutcome
@@ -36,6 +37,7 @@ _SITE_SETTINGS = "5431"
 _SITE_BUSY = "c2f7"
 _SITE_WANTED_PROBLEM = "5f67"
 _SITE_FINISHED = "f2d3"
+_SITE_GRID_PROBLEM = "b3eb"
 
 _HOSTS = {
     "cvelist": cvelist.HOSTS,
@@ -56,7 +58,7 @@ class VulnMosaicRefreshCollector(CollectorBase):
         self.declare_no_surfaces()
         self.record_info(_SITE_STARTED, "RUN_STARTED", "Refreshing the local vulnerability datasets.")
         try:
-            report = run_refresh()
+            report = run_refresh(grid_reader=read_grid_ids)
         except SettingsError as exc:
             self.summary = f"Settings invalid; no source was fetched: {exc}"[:400]
             self.record_error(_SITE_SETTINGS, "SETTINGS_INVALID", str(exc))
@@ -68,6 +70,8 @@ class VulnMosaicRefreshCollector(CollectorBase):
 
         for note in report.wanted_problems:
             self.record_warn(_SITE_WANTED_PROBLEM, "WANTED_FILE_PROBLEM", note)
+        for note in report.grid_problems:
+            self.record_warn(_SITE_GRID_PROBLEM, "GRID_READ_PROBLEM", note)
         for outcome in report.outcomes:
             self._record_outcome(outcome)
         self.summary = report.summary()[:400]
@@ -137,5 +141,6 @@ def _report_data(report: RunReport) -> dict[str, Any]:
         "failed": report.failed_sources,
         "stale": report.stale_sources,
         "spooled": report.spooled,
+        "grid_ids": report.grid_ids,
         "sources": [o.line() for o in report.outcomes],
     }

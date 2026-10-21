@@ -34,9 +34,19 @@ class SourceSettings:
     ecosystems: tuple[str, ...] = ()
 
 
+DEFAULT_GRID_TYPES = ("compliance_core__compliance_vulnerability",)
+
+
+@dataclass(frozen=True)
+class GridSettings:
+    enabled: bool = True
+    vulnerability_types: tuple[str, ...] = DEFAULT_GRID_TYPES
+
+
 @dataclass(frozen=True)
 class Settings:
     sources: Mapping[str, SourceSettings]
+    grid: GridSettings = field(default_factory=GridSettings)
     immediate_fetch: bool = False
     mirror: Mapping[str, Path] = field(default_factory=lambda: MappingProxyType({}))
 
@@ -66,8 +76,14 @@ def parse_settings(data: Mapping[str, Any]) -> Settings:
             ecosystems=tuple(given.get("ecosystems", base.ecosystems)),
         )
     mirror = {name: Path(path) for name, path in (data.get("mirror") or {}).items()}
+    given_grid = data.get("grid") or {}
+    grid = GridSettings(
+        enabled=given_grid.get("enabled", True),
+        vulnerability_types=tuple(given_grid.get("vulnerability_types", DEFAULT_GRID_TYPES)),
+    )
     return Settings(
         sources=MappingProxyType(sources),
+        grid=grid,
         immediate_fetch=bool(data.get("immediate_fetch", False)),
         mirror=MappingProxyType(mirror),
     )

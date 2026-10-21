@@ -159,6 +159,27 @@
           "minLength": 1
         }
       }
+    },
+    "grid": {
+      "description": "Where the refresh learns which vulnerability ids to hold. It reads the vulnerability nodes already on the grid and wants each one's id; it writes nothing to the grid. On by default.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "Whether the refresh reads vulnerability ids from the grid. Default true.",
+          "type": "boolean"
+        },
+        "vulnerability_types": {
+          "description": "Entity-type slugs whose nodes carry a vuln_id (a CVE or GHSA id). A type that is not installed is reported and skipped. Default: compliance_core__compliance_vulnerability.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,63}__[a-z][a-z0-9_]{0,63}$"
+          },
+          "uniqueItems": true,
+          "maxItems": 8
+        }
+      }
     }
   }
 }

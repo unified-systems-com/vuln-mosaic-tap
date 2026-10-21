@@ -6,6 +6,7 @@ import json
 import os
 import re
 import stat
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -120,6 +121,40 @@ def ingest_spool(home: Path, store: RecordStore, *, kind: str = "cve") -> list[s
         os.unlink(spool / name)
         taken.append(vuln_id)
     return taken
+
+
+MAX_GRID_WANTED = 200_000  # grid-origin rows one store may hold in total, across every run
+
+
+def ingest_grid(store: RecordStore, ids: Iterable[str], *, kind: str = "cve") -> tuple[int, list[str]]:
+    """Add grid-supplied ids of ``kind`` to the ``wanted`` table; return (taken, problems).
+
+    The grid is outside the trust boundary: a value that is not exactly a CVE or GHSA id is refused and
+    named, never stored, and nothing here places an id on a command line. Grid-origin rows are bounded
+    in total (``MAX_GRID_WANTED``), so ids rotated between runs cannot ratchet the table without limit."""
+    taken, problems = 0, []
+    room = MAX_GRID_WANTED - store.wanted_count("grid")
+    full = False
+    for value in ids:
+        try:
+            vuln_id = validate_vuln_id(value)
+        except ValueError:
+            if len(problems) < 20:
+                problems.append(f"grid: not a CVE or GHSA id: {value!r:.80}")
+            continue
+        if bool(GHSA_ID_RE.fullmatch(vuln_id)) != (kind == "ghsa"):
+            continue
+        if store.is_wanted(vuln_id):
+            continue
+        if room <= 0:
+            full = True
+            continue
+        store.add_wanted(vuln_id, "grid")
+        room -= 1
+        taken += 1
+    if full:
+        problems.append(f"grid: not all ids were added, {MAX_GRID_WANTED} grid-origin wanted ids is the bound")
+    return taken, problems
 
 
 def wanted_set(scan: WantedScan, store: RecordStore, *, kind: str = "cve") -> set[str]:
