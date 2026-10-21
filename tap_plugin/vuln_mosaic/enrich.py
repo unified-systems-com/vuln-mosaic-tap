@@ -18,13 +18,14 @@ The rules, in one place:
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from tap_plugin.vuln_mosaic.advisories import ParsedAdvisory
 from tap_plugin.vuln_mosaic.ids import CVE_ID_RE, GHSA_ID_RE
+from tap_plugin.vuln_mosaic.integrity import version_tuple
 from tap_plugin.vuln_mosaic.lookup import (
     FOUND,
     LISTED,
@@ -182,14 +183,26 @@ def _newer(ours: object, theirs: object) -> bool:
     return isinstance(ours, str) and isinstance(theirs, str) and ours > theirs
 
 
-def _group_may_move(current: Mapping[str, Any], group: tuple[str, ...], stamp: str, ours: object) -> bool:
+def _newer_version(ours: object, theirs: object) -> bool:
+    """True when dotted-integer version ``ours`` is above ``theirs``, compared as the KEV refresh compares them.
+
+    A version that is not dotted integers is never newer: it cannot be ordered, so it moves nothing."""
+    try:
+        return version_tuple(str(ours)) > version_tuple(str(theirs))
+    except (ValueError, TypeError):
+        return False
+
+
+def _group_may_move(
+    current: Mapping[str, Any], group: tuple[str, ...], stamp: str, ours: object, newer: Callable[[object, object], bool] = _newer
+) -> bool:
     """A KEV or EPSS group is written when the node has none of it, or when ours is stamped newer than theirs.
 
     A node with part of a group but no stamp is another writer's and is left, and a node stamped newer than
     our dataset is never moved back, whatever else it lacks."""
     theirs = current.get(stamp)
     if theirs is not None:
-        return _newer(ours, theirs)
+        return newer(ours, theirs)
     return all(current.get(name) is None for name in group)
 
 
@@ -201,9 +214,9 @@ def plan_patch(current: Mapping[str, Any], facts: Mapping[str, Any]) -> dict[str
             continue
         if current.get(name) is None:
             patch[name] = facts[name]
-    if "cvss_score" in facts and all(current.get(name) is None for name in CVSS_GROUP):
+    if all(name in facts for name in CVSS_GROUP) and all(current.get(name) is None for name in CVSS_GROUP):
         patch.update({name: facts[name] for name in CVSS_GROUP if name in facts})
-    if "kev" in facts and _group_may_move(current, KEV_GROUP, "kev_catalog_version", facts.get("kev_catalog_version")):
+    if "kev" in facts and _group_may_move(current, KEV_GROUP, "kev_catalog_version", facts.get("kev_catalog_version"), _newer_version):
         group = {name: facts[name] for name in KEV_GROUP if name in facts}
         if facts["kev"] is False:
             # No longer on the catalog: the details of an earlier listing are withdrawn with it.

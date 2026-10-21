@@ -40,9 +40,12 @@ def _query(entity_type: str, limit: int) -> str:
     )
 
 
-def iter_nodes(settings: Settings, execute: Execute, problems: list[str]) -> Iterator[dict[str, Any]]:
-    """Nodes of the configured types, one page in memory at a time. A type that cannot be read is named."""
+def iter_nodes(settings: Settings, execute: Execute, out: EnrichResult) -> Iterator[dict[str, Any]]:
+    """Nodes of the configured types, one page in memory at a time. A type that cannot be read is named.
+
+    When no configured type can be read at all, the write phase has nothing to work on and is marked ``raised``."""
     scanned = 0
+    unreadable = 0
     for entity_type in settings.grid.vulnerability_types:
         after = ""
         try:
@@ -58,7 +61,10 @@ def iter_nodes(settings: Settings, execute: Execute, problems: list[str]) -> Ite
                     break
                 after = last
         except Exception as exc:
-            problems.append(f"grid write: {entity_type}: {type(exc).__name__}: {str(exc)[:160]}")
+            unreadable += 1
+            out.problems.append(f"grid write: {entity_type}: {type(exc).__name__}: {str(exc)[:160]}")
+    if settings.grid.vulnerability_types and unreadable == len(settings.grid.vulnerability_types):
+        out.raised = True
 
 
 def _error_text(result: Any) -> str:
@@ -123,7 +129,7 @@ def enrich_grid(
     attempt_cap = budget * 5  # nodes the grid keeps refusing must not make a run try the whole grid
     attempted = 0
     chunk: list[tuple[str, int, dict[str, Any]]] = []
-    for node in iter_nodes(settings, execute, out.problems):
+    for node in iter_nodes(settings, execute, out):
         try:
             validate_vuln_id(node["vuln_id"])
         except ValueError:

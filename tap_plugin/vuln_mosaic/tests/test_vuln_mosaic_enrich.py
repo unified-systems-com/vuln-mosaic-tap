@@ -143,6 +143,20 @@ def test_the_cvss_group_is_written_whole_or_not_at_all() -> None:  # enrich-2
     assert group == {"cvss_score": 7.5, "cvss_vector": "V", "cvss_version": "3.1", "cvss_source": "CNA"}
 
 
+def test_kev_versions_compare_as_numbers_not_as_text() -> None:  # enrich-3
+    held = {**EMPTY, "kev": True, "kev_catalog_version": "2026.9.1"}
+    newer = {**FACTS, "kev_catalog_version": "2026.10.15"}
+    assert plan_patch(held, newer)["kev_catalog_version"] == "2026.10.15", "10 is above 9 although '10' sorts below '9'"
+    held = {**EMPTY, "kev": True, "kev_catalog_version": "2026.10.15"}
+    assert "kev" not in plan_patch(held, {**FACTS, "kev_catalog_version": "2026.9.1"})
+    assert "kev" not in plan_patch({**held, "kev_catalog_version": "weird"}, FACTS), "an unorderable stamp moves nothing"
+
+
+def test_a_cvss_metric_without_a_vector_writes_no_cvss_at_all() -> None:  # enrich-2
+    partial = {"cvss_score": 7.5, "cvss_version": "3.1", "cvss_source": "CNA"}
+    assert not {k for k in plan_patch(EMPTY, partial) if k.startswith("cvss")}
+
+
 def test_kev_is_rewritten_only_for_a_newer_catalog() -> None:  # enrich-3
     held = {**EMPTY, "kev": True, "kev_catalog_version": "2026.10.15", "kev_added": "2026-01-01"}
     assert not {k for k in plan_patch(held, FACTS) if k.startswith("kev")}, "the same catalog: nothing to say"
@@ -310,6 +324,20 @@ def test_an_unreadable_type_is_named_and_nothing_is_written(home) -> None:  # en
 
     out = gridwrite.enrich_grid(parse_settings({}), home, execute=execute, batch=lambda *a, **k: pytest.fail("wrote"))
     assert out.patched == 0 and out.problems and "LookupError" in out.problems[0]
+    assert out.broken, "no configured type could be read: the run is not clean"
+
+
+def test_one_unreadable_type_among_readable_ones_is_only_a_warning(home) -> None:  # enrich-6
+    grid = Grid([_row(1)])
+
+    def execute(query, inputs):
+        if "bad__type" in query:
+            raise LookupError("unknown entity type")
+        return grid.execute(query, inputs)
+
+    settings = parse_settings({"grid": {"vulnerability_types": ["bad__type", "compliance_core__compliance_vulnerability"]}})
+    out = gridwrite.enrich_grid(settings, home, execute=execute, batch=grid.batch, facts=_facts)
+    assert out.patched == 1 and out.problems and not out.broken
 
 
 # --- the run -------------------------------------------------------------------------------------
