@@ -91,6 +91,45 @@ def test_the_grid_is_read_in_pages_by_id(home) -> None:
     assert seen_after == ["", every[gridread.PAGE - 1], every[gridread.PAGE * 2 - 1]]
 
 
+def test_malformed_values_never_count_toward_the_id_bound(monkeypatch) -> None:  # wanted-8
+    monkeypatch.setattr(gridread, "MAX_IDS", 3)
+    rows = ["!" * 5 + str(n) for n in range(10)] + ["CVE-2026-00001", "CVE-2026-00002"]
+
+    def execute(query, inputs):
+        return {"rows": [{"id": i} for i in sorted(rows) if i > inputs["after"]][: gridread.PAGE]}
+
+    read = gridread.read_grid_ids(parse_settings({}), execute)
+    assert read.ids == ["CVE-2026-00001", "CVE-2026-00002"]
+    assert sum("not a CVE or GHSA id" in p for p in read.problems) == 10
+
+
+def test_the_pager_stops_when_the_id_bound_is_reached(monkeypatch) -> None:  # wanted-8
+    monkeypatch.setattr(gridread, "MAX_IDS", 3)
+    monkeypatch.setattr(gridread, "PAGE", 2)
+    calls: list[str] = []
+    every = [f"CVE-2026-{n:05d}" for n in range(1, 50)]
+
+    def execute(query, inputs):
+        calls.append(inputs["after"])
+        return {"rows": [{"id": i} for i in every if i > inputs["after"]][:2]}
+
+    read = gridread.read_grid_ids(parse_settings({}), execute)
+    assert read.ids == every[:3] and any("stopped at 3 ids" in p for p in read.problems)
+    assert len(calls) <= 3, "it must not walk the rest of the type"
+
+
+def test_the_pager_stops_after_the_row_bound(monkeypatch) -> None:  # wanted-8
+    monkeypatch.setattr(gridread, "MAX_ROWS", 4)
+    monkeypatch.setattr(gridread, "PAGE", 2)
+
+    def execute(query, inputs):
+        n = int(inputs["after"][1:] or 0)
+        return {"rows": [{"id": f"x{n + 1}"}, {"id": f"x{n + 2}"}]}  # never a valid id, always advancing
+
+    read = gridread.read_grid_ids(parse_settings({}), execute)
+    assert any("scanning 4 rows" in p for p in read.problems) and read.ids == []
+
+
 def test_a_repeated_or_non_string_row_is_ignored() -> None:
     def execute(query, inputs):
         return {"rows": [{"id": "CVE-2022-0001"}, {"id": "CVE-2022-0001"}, {"id": 7}, {"other": 1}, "x"]}
