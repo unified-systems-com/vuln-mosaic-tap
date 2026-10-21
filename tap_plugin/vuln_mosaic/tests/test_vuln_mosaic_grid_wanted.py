@@ -160,7 +160,35 @@ def test_each_store_takes_only_its_own_kind(home) -> None:  # wanted-7
     with RecordStore.open_writer(home, "cvelist") as cve, RecordStore.open_writer(home, "ghsa") as ghsa:
         assert ingest_grid(cve, ["CVE-2022-0001", TOCTOU]) == (1, [])
         assert ingest_grid(ghsa, ["CVE-2022-0001", TOCTOU], kind="ghsa") == (1, [])
+        assert ingest_grid(cve, ["CVE-2022-0001"]) == (0, []), "an id already wanted is not added twice"
         assert cve.wanted_ids() == {"CVE-2022-0001"} and ghsa.wanted_ids() == {TOCTOU}
+
+
+def test_grid_origin_rows_are_bounded_in_total_across_runs(home, monkeypatch) -> None:  # wanted-8
+    from tap_plugin.vuln_mosaic import wanted as wanted_mod
+
+    monkeypatch.setattr(wanted_mod, "MAX_GRID_WANTED", 3)
+    with RecordStore.open_writer(home, "cvelist") as store:
+        store.add_wanted("CVE-2020-0001", "spool")  # other origins do not use the grid's room
+        assert ingest_grid(store, ["CVE-2026-00001", "CVE-2026-00002"])[0] == 2
+        taken, problems = ingest_grid(store, ["CVE-2026-00003", "CVE-2026-00004", "CVE-2026-00005"])
+        assert taken == 1 and any("3 grid-origin wanted ids is the bound" in p for p in problems)
+        assert store.wanted_count("grid") == 3
+        assert ingest_grid(store, ["CVE-2026-00001"]) == (0, []), "re-reading an id already wanted costs no room"
+
+
+def test_a_busy_lock_costs_no_grid_read(home, upstream, clock) -> None:  # wanted-8
+    from tap_plugin.vuln_mosaic.locking import LockBusy, writer_lock
+
+    calls: list[int] = []
+
+    def reader(settings):
+        calls.append(1)
+        return GridRead()
+
+    with writer_lock(home), pytest.raises(LockBusy):
+        run(home, upstream, clock, reader)
+    assert calls == []
 
 
 def test_grid_settings_defaults_and_validation() -> None:  # wanted-7

@@ -35,9 +35,9 @@ def run_refresh(
     root = resolve_home(home)
     settings = settings or load_settings(root)
     report = RunReport()
-    grid_ids = _read_grid(settings, grid_reader, report)
-    ctx = RunContext(root, settings, now, fetcher_factory, git_factory, grid_ids)
     with writer_lock(root):
+        # Read the grid only once this run holds the lock, so a busy lock costs no grid query.
+        ctx = RunContext(root, settings, now, fetcher_factory, git_factory, _read_grid(settings, grid_reader, report))
         for name in ORDER:
             if not settings.sources[name].enabled:
                 continue
@@ -94,8 +94,7 @@ def _take_grid(ctx: RunContext, store: RecordStore, kind: str, report: RunReport
     if not ctx.grid_ids:
         return
     with store.transaction():
-        _, bad = ingest_grid(store, ctx.grid_ids, kind=kind)
-    for value in bad:
-        note = f"grid: not a CVE or GHSA id: {value}"
+        _, problems = ingest_grid(store, ctx.grid_ids, kind=kind)
+    for note in problems:
         if note not in report.grid_problems:
             report.grid_problems.append(note)

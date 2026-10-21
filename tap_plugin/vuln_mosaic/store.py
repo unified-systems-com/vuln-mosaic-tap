@@ -156,6 +156,12 @@ class RecordStore:
             (cve_id, to_iso(utcnow()), origin),
         )
 
+    def wanted_count(self, origin: str) -> int:
+        return self._conn.execute("SELECT COUNT(*) FROM wanted WHERE origin = ?", (origin,)).fetchone()[0]
+
+    def is_wanted(self, cve_id: str) -> bool:
+        return self._conn.execute("SELECT 1 FROM wanted WHERE id = ?", (cve_id,)).fetchone() is not None
+
     def wanted_ids(self) -> set[str]:
         return {r[0] for r in self._conn.execute("SELECT id FROM wanted")}
 
