@@ -23,7 +23,7 @@ Three consequences shape v0:
 2. **A running instance makes no lookup at use time, by default.** A read of a CVE that is not held returns *not fetched* and queues the id for the next scheduled run. Fetching on the spot exists, but it is an operator switch that is off by default, because a blocking network call inside another module's request is a latency and failure surface, and because some deployments allow no egress at all.
 3. **Three states, never two.** A CVE that has not been fetched is *not fetched* (unobserved), never "no such CVE". A dataset past its limit is *stale*, never silently current. A source that could not be reached ends the run failed, never clean. Absence of a record is not a finding of absence.
 
-**What it deliberately does not do.** It does not scan, match or write findings (grype-tap does that); it does not make vulnerability records into grid nodes; it ships no pages or panels in v0. Grype stays the source of KEV status for the vulnerabilities it matched; the KEV file here is a lookup for CVEs Grype never matched. It does not build or serve a vulnerability vocabulary (compliance_core owns that).
+**What it deliberately does not do.** It does not scan, match or write findings (grype-tap does that); it does not make vulnerability records into grid nodes, though it fills the facts it holds onto vulnerability nodes that scanners already put there; it ships no pages or panels in v0. Grype stays the source of KEV status for the vulnerabilities it matched; the KEV file here is a lookup for CVEs Grype never matched. It does not build or serve a vulnerability vocabulary (compliance_core owns that).
 
 **Prior art, and what it changed.** Grype and Trivy ship a single database file plus a metadata file and refresh by staged swap; this plugin takes the staged swap, the validation before use, the age rule measured from the source's own time, and the operator mirror, and rejects shipping a prebuilt database because the upstream records are already per-record JSON. OSV-Scanner keeps per-ecosystem zip files in a cache directory and has an explicit offline mode; this plugin takes the per-ecosystem opt-in and the offline switch. Dependency-Track and dependency-check keep a persistent local copy of NVD data and refresh it from a modified-since feed; this plugin takes the persistent store and the incremental refresh. Every project that builds its own local copy of upstream records uses a database as the working store, which is why record sources are SQLite files here and only whole-file sources are plain files. The fetch-on-the-spot read has no precedent in the scanners surveyed, which all pre-fetch; that is why it is off by default.
 
@@ -64,6 +64,7 @@ Three consequences shape v0:
 | req-vuln-mosaic-corpus | [The Corpus Proof](#the-corpus-proof) | Implemented | Tests from real committed records, an egress-blocked run and a negative test per fail-closed path |
 | req-vuln-mosaic-panel-cve | [The CVE Panel](#the-cve-panel) | Implemented | One panel type showing a CVE's record, KEV entry and EPSS score from the local datasets, structured, no prose |
 | req-vuln-mosaic-commands | [Operator Commands](#operator-commands) | Implemented | `vuln_mosaic_want` writes a consumer's wanted file; `vuln_mosaic_refresh` runs a refresh now |
+| req-vuln-mosaic-enrich | [Enriching Vulnerability Nodes](#enriching-vulnerability-nodes) | Implemented | After the sources refresh, fills unobserved facts on existing vulnerability nodes from the local copies; patches only; never overwrites |
 | req-vuln-mosaic-nongoals | [Non-Goals](#non-goals) | Implemented | No scanning, matching or findings; no records as nodes; no pages in v0 |
 | req-vuln-mosaic-osv-incremental | [OSV Increments](#osv-increments) | Backlog | Apply OSV's modified-id list instead of swapping whole zips |
 | req-vuln-mosaic-data-home | [A Platform Data Directory](#a-platform-data-directory) | Backlog | A core convention for operator data directories, deferred |
@@ -325,7 +326,7 @@ One collector, `vuln_mosaic:refresh`, runs every enabled source on a seeded hour
 - **`run()`:** takes the writer lock, ingests the spool, then for each enabled source in a fixed order fetches, verifies (`req-vuln-mosaic-integrity`) and applies. One source failing never skips the rest. Each source's outcome is recorded with `record_info`, `record_warn` or `record_error` carrying the source, the `source_version`, counts and, on failure, the reason; the run `summary` names the sources that failed and those that are stale. `submit_grift` is never called, and `declare_no_surfaces()` says on the record that no listing surface was read. A run in which any source failed or is stale ends as a failed collection job naming each such source, never clean.
 - **`self_test`:** `<home>` is writable, the settings file validates, the `git` binary is present, and each enabled source's host is named; a reachability check is read-only.
 - **Gate (resolved):** the tap_cares task body accepts a run that lands zero batches. *Ran* 2026-10-19 in a dev stack: the collector fired through `fire_collector_and_await` ended `SUCCESSFUL` with its results and summary recorded and no batch.
-- **Actor:** the collector runs as the `tap_cares.collector` program actor that the task body binds (*read* in `tap_cares/tasks.py`) and writes no grid object itself; its grid footprint is the job record plus read-only queries for the vulnerability ids it should hold (`req-vuln-mosaic-wanted-7`).
+- **Actor:** the collector runs as the `tap_cares.collector` program actor that the task body binds (*read* in `tap_cares/tasks.py`) and creates no grid object; its grid footprint is the job record, read-only queries for the vulnerability ids it should hold (`req-vuln-mosaic-wanted-7`), and patches that fill unobserved facts on existing vulnerability nodes (`req-vuln-mosaic-enrich`).
 
 #### Acceptance Criteria
 
@@ -573,6 +574,37 @@ Two Django management commands let an operator prime a stack without writing fil
 | req-vuln-mosaic-commands-1 | Want Writes A Valid File | Implemented | The command writes a file the wanted scan accepts, drops duplicates and malformed ids, replaces its own earlier list, and refuses a bad consumer name or an empty list. | |
 | req-vuln-mosaic-commands-2 | Refresh Reports | Implemented | The refresh command prints each outcome and fails when the run is not clean. | |
 
+### Enriching Vulnerability Nodes
+
+----
+RID: `req-vuln-mosaic-enrich`
+
+Status: `Implemented`
+
+Scanners and collectors put a vulnerability on the grid with whatever they happen to know about it, and often not its CVSS score, CWE, SSVC decision, KEV listing or EPSS score. This plugin already holds those facts locally, so after the sources refresh it fills the ones a node lacks. The maintainer ruled on 2026-10-21 that writing the enriched data to the grid is allowed; it is on by default and `settings.grid.enrich.enabled = false` turns it off.
+
+#### Implementation
+
+- **Where:** `enrich.py` decides (Django-free: `facts_for` reads the local datasets, `plan_patch` applies the rules); `collectors/refresh/gridwrite.py` reads the nodes and writes the result. Both run inside the refresh, last, under the writer lock, so a run's own fetches are visible to it.
+- **Which nodes:** every node of `settings.grid.vulnerability_types` (the same types the id read uses), read in pages with the fields enrichment may fill and the node's version. A node is never created or deleted.
+- **Rules:** a fact the node does not have (`null`; an empty list is an observation) is filled; a fact it has is left alone, whoever wrote it. The CVSS fields (score, vector, version, source) are one group and are written together or not at all; a metric with no vector writes none of them. The KEV group and the EPSS group are rewritten only when the local dataset is newer than the one the node's values came from (KEV catalog version, EPSS score date); a group is filled only when the node has none of it, a node with part of a group and no stamp is another writer's and is left, and a node stamped newer than the local dataset is never moved back, whatever else it lacks. A KEV write is one observation of one catalog, so any detail that catalog does not carry (a delisting, or a listing without a due date) is cleared if the node holds it. A KEV or EPSS dataset that was never checked or is past its staleness limit contributes nothing, so "not listed" is never read from an old catalog. Withdrawn advisories, rejected records and a CVSS v4-only advisory (no computed score) contribute nothing for the fact they lack.
+- **Facts:** from the CVE record: title, description, publication and modification dates, `record_url` (the CVE Services record), the primary CVSS metric with the container that scored it as its source, CWE ids, SSVC. From KEV and EPSS: the listing and its dates, ransomware use, score, percentile and score date. For a GHSA-only node: the advisory's summary, details, dates, CWE ids and computed v3 score (source `GitHub advisory`).
+- **Writing:** `patch_node` only, in atomic batches of fifty, each carrying the version it was read at, named "vuln_mosaic enrichment". A patch the grid refuses rolls its batch back and the nodes are retried one at a time, so one conflict costs one node, retried on the next run. The grid is read one page at a time. The run stops when `settings.grid.enrich.max_nodes_per_run` (default 2000) patches have been written, or after five times that many attempts, so nodes the grid keeps refusing cannot starve the ones after them; a node whose only fact is a list the grid cannot take is not an attempt.
+- **List facts:** *Ran* 2026-10-21 against tap core: a PATCH carrying a JSON list (`cwes`) raises `'list' object has no attribute 'items'`, because the patch deep-merges every JSON field as if it were an object. Until core is fixed the plugin writes every other fact and reports `cwes` as deferred, once per run; it does not retry the list on the other nodes of that run.
+- **Failure:** an unreadable type or a refused node is named in the run record. If the write phase itself raises, no configured type can be read, or every node it tried was refused, the run ends not clean ("grid write failed"), though the sources have already refreshed; a grid that cannot patch lists is a warning, not a failure.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-vuln-mosaic-enrich-1 | Facts From Local Datasets | Implemented | For a CVE id the facts come from the held record, KEV and EPSS; for a GHSA id from the held advisory; nothing held means no facts. | |
+| req-vuln-mosaic-enrich-2 | Fill, Never Overwrite | Implemented | A fact the node already has is not written, an empty list counts as held, and the CVSS fields are written whole or not at all. | Mutation-checked: breaking the rule fails four tests. |
+| req-vuln-mosaic-enrich-3 | Volatile Facts Only Move Forward | Implemented | KEV is rewritten only for a newer catalog version (compared as dotted integers, as the KEV refresh does) and EPSS only for a newer score date, a group is filled only when none of it is held, a node stamped newer is never moved back, a delisting clears the details, and a stale or unchecked dataset contributes nothing. | |
+| req-vuln-mosaic-enrich-4 | Withdrawn And Rejected Add Nothing | Implemented | A withdrawn advisory and a rejected record produce no facts. | |
+| req-vuln-mosaic-enrich-5 | Patch Only, At The Version Read | Implemented | Writes are `patch_node` operations carrying the node's version; a node with no version, or nothing to add, is not written. | Ran against a real grid with compliance_core v0.8.5: the Log4Shell node gained score, vector, source, KEV, EPSS and URL; a node with its own title and a Vendor score kept both; a second run changed nothing. |
+| req-vuln-mosaic-enrich-6 | Failures Named, Bounded | Implemented | A refused patch costs only its node; a grid that cannot patch lists gets every other fact and `cwes` is reported deferred once; an unreadable type is named; ids that are not ids are never looked up; the grid is read lazily and unwritable nodes cannot starve later ones. | |
+| req-vuln-mosaic-enrich-7 | Optional, Last, Visible | Implemented | It runs once, after the sources, only when `grid.enabled` and `grid.enrich.enabled`; a write phase that raises or has every node refused makes the run not clean while the sources stay refreshed; the enrichment logic imports neither Django nor tap_grid. | |
+
 ### Non-Goals
 
 ----
@@ -593,7 +625,7 @@ Things this plugin is not going to do, stated so a later change cannot grow into
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
-| req-vuln-mosaic-nongoals-1 | No Findings Written | Implemented | A full run writes no `finding`, `vulnerability` or other graph node; its grid footprint is the collection job, the seeded schedule, and read-only queries for the vulnerability ids it should hold. | |
+| req-vuln-mosaic-nongoals-1 | No Findings Written | Implemented | A full run creates and deletes no graph node and writes no finding; its grid footprint is the collection job, the seeded schedule, read-only queries for the vulnerability ids it should hold, and patches that fill unobserved facts on existing vulnerability nodes (`req-vuln-mosaic-enrich`). | |
 | req-vuln-mosaic-nongoals-2 | No Pages Shipped | Implemented | The package ships no page, and the manifest declares no pages; its one panel type is registered in code. | |
 
 ### OSV Increments
@@ -630,7 +662,7 @@ RID: `req-vuln-mosaic-grift-bridge`
 
 Status: `Backlog`
 
-The default ruling is that vulnerability records stay files and consumers read them. If a future need arises for CVE records to be queryable on the grid, this requirement is where that question is decided; it is not scheduled.
+The default ruling is that vulnerability records stay files and consumers read them; the facts a vulnerability node can carry are written onto nodes that already exist (`req-vuln-mosaic-enrich`), but a record is never a node of its own. If a future need arises for CVE records to be queryable on the grid, this requirement is where that question is decided; it is not scheduled.
 
 ## Reference data
 

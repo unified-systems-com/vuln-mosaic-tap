@@ -12,6 +12,7 @@ import shutil
 from typing import Any
 
 from tap_plugin.vuln_mosaic.collectors.refresh.gridread import read_grid_ids
+from tap_plugin.vuln_mosaic.collectors.refresh.gridwrite import enrich_grid
 from tap_plugin.vuln_mosaic.home import resolve_home
 from tap_plugin.vuln_mosaic.locking import LockBusy
 from tap_plugin.vuln_mosaic.outcome import RunReport, SourceOutcome
@@ -38,6 +39,8 @@ _SITE_BUSY = "c2f7"
 _SITE_WANTED_PROBLEM = "5f67"
 _SITE_FINISHED = "f2d3"
 _SITE_GRID_PROBLEM = "b3eb"
+_SITE_GRID_WRITE_PROBLEM = "a576"
+_SITE_GRID_WRITE_FAILED = "3e88"
 
 _HOSTS = {
     "cvelist": cvelist.HOSTS,
@@ -58,7 +61,7 @@ class VulnMosaicRefreshCollector(CollectorBase):
         self.declare_no_surfaces()
         self.record_info(_SITE_STARTED, "RUN_STARTED", "Refreshing the local vulnerability datasets.")
         try:
-            report = run_refresh(grid_reader=read_grid_ids)
+            report = run_refresh(grid_reader=read_grid_ids, grid_writer=enrich_grid)
         except SettingsError as exc:
             self.summary = f"Settings invalid; no source was fetched: {exc}"[:400]
             self.record_error(_SITE_SETTINGS, "SETTINGS_INVALID", str(exc))
@@ -72,6 +75,11 @@ class VulnMosaicRefreshCollector(CollectorBase):
             self.record_warn(_SITE_WANTED_PROBLEM, "WANTED_FILE_PROBLEM", note)
         for note in report.grid_problems:
             self.record_warn(_SITE_GRID_PROBLEM, "GRID_READ_PROBLEM", note)
+        if report.enrich is not None:
+            for note in report.enrich.problems:
+                self.record_warn(_SITE_GRID_WRITE_PROBLEM, "GRID_WRITE_PROBLEM", note)
+            if report.enrich.broken:
+                self.record_error(_SITE_GRID_WRITE_FAILED, "GRID_WRITE_FAILED", "Enriching the vulnerability nodes failed outright; the sources were refreshed.")
         for outcome in report.outcomes:
             self._record_outcome(outcome)
         self.summary = report.summary()[:400]
@@ -142,5 +150,17 @@ def _report_data(report: RunReport) -> dict[str, Any]:
         "stale": report.stale_sources,
         "spooled": report.spooled,
         "grid_ids": report.grid_ids,
+        "enrich": (
+            None
+            if report.enrich is None
+            else {
+                "patched": report.enrich.patched,
+                "unchanged": report.enrich.unchanged,
+                "failed": report.enrich.failed,
+                "lists_deferred": report.enrich.lists_deferred,
+                "stopped_early": report.enrich.stopped_early,
+                "fields": report.enrich.fields,
+            }
+        ),
         "sources": [o.line() for o in report.outcomes],
     }

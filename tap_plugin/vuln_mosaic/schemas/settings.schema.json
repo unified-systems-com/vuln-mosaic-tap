@@ -161,7 +161,7 @@
       }
     },
     "grid": {
-      "description": "Where the refresh learns which vulnerability ids to hold. It reads the vulnerability nodes already on the grid and wants each one's id; it writes nothing to the grid. On by default.",
+      "description": "What the refresh reads from, and writes to, the grid. It reads the vulnerability nodes already there to learn which ids to hold (on by default), and then fills the facts those nodes lack from the local copies (on by default). It never creates or deletes a node.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -178,6 +178,23 @@
           },
           "uniqueItems": true,
           "maxItems": 8
+        },
+        "enrich": {
+          "description": "Fill unobserved facts on existing vulnerability nodes (CVSS, CWE, SSVC, KEV, EPSS, record dates and text) from the local datasets. A fact a node already has is not overwritten, except KEV and EPSS when the local dataset is newer. Needs grid.enabled.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "description": "Whether the refresh writes to the grid. Default true.",
+              "type": "boolean"
+            },
+            "max_nodes_per_run": {
+              "description": "At most this many nodes are patched in one run; the rest wait for the next. Default 2000.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50000
+            }
+          }
         }
       }
     }

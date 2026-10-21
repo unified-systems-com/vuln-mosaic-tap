@@ -10,7 +10,7 @@ from tap_plugin.vuln_mosaic.fetch import Fetcher
 from tap_plugin.vuln_mosaic.gitops import Git
 from tap_plugin.vuln_mosaic.home import resolve_home
 from tap_plugin.vuln_mosaic.locking import writer_lock
-from tap_plugin.vuln_mosaic.outcome import GridRead, RunContext, RunReport, SourceOutcome
+from tap_plugin.vuln_mosaic.outcome import EnrichResult, GridRead, RunContext, RunReport, SourceOutcome
 from tap_plugin.vuln_mosaic.settings import Settings, load_settings
 from tap_plugin.vuln_mosaic.sources import cvelist, epss, ghsa, kev, nvd, osv
 from tap_plugin.vuln_mosaic.staleness import utcnow
@@ -30,6 +30,7 @@ def run_refresh(
     git_factory: Callable[..., Git] = Git,
     sleep: Callable[[float], None] | None = None,
     grid_reader: Callable[[Settings], GridRead] | None = None,
+    grid_writer: Callable[[Settings, Path], EnrichResult] | None = None,
 ) -> RunReport:
     """Run every enabled source once under the writer lock. One source failing never skips the rest."""
     root = resolve_home(home)
@@ -45,6 +46,7 @@ def run_refresh(
                 report.outcomes.append(_run_source(name, ctx, report, sleep))
             except Exception as exc:
                 report.outcomes.append(SourceOutcome(name, ok=False, error=f"{type(exc).__name__}: {exc}"[:500]))
+        _enrich_grid(settings, grid_writer, root, report)
     return report
 
 
@@ -60,6 +62,16 @@ def _read_grid(settings: Settings, reader: Callable[[Settings], GridRead] | None
     report.grid_problems.extend(read.problems)
     report.grid_ids = len(read.ids)
     return tuple(read.ids)
+
+
+def _enrich_grid(settings: Settings, writer: Callable[[Settings, Path], EnrichResult] | None, root: Path, report: RunReport) -> None:
+    """Write what the datasets now hold back to the grid. Runs last, so it sees this run's fetches; a failure is only reported."""
+    if not (settings.grid.enabled and settings.grid.enrich) or writer is None:
+        return
+    try:
+        report.enrich = writer(settings, root)
+    except Exception as exc:  # the grid refusing a write must never turn a good refresh into a failed one
+        report.enrich = EnrichResult(raised=True, problems=[f"grid write: {type(exc).__name__}: {exc}"[:300]])
 
 
 def _run_source(name: str, ctx: RunContext, report: RunReport, sleep: Callable[[float], None] | None) -> SourceOutcome:

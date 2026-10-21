@@ -22,6 +22,26 @@ class GridRead:
 
 
 @dataclass
+class EnrichResult:
+    """What writing the facts back to the grid did: nodes patched, left alone, and a sentence per problem."""
+
+    patched: int = 0
+    unchanged: int = 0
+    stopped_early: bool = False  # the per-run bound was reached; the rest wait for the next run
+    raised: bool = False  # the write phase itself failed, as opposed to single nodes being refused
+    failed: int = 0
+    lists_deferred: int = 0  # nodes whose list-valued facts (cwes) the grid's patch could not take
+    fields: int = 0
+    problems: list[str] = field(default_factory=list)
+
+
+    @property
+    def broken(self) -> bool:
+        """The write phase did not work at all: it raised, or every node it tried was refused."""
+        return self.raised or (self.failed > 0 and self.patched == 0)
+
+
+@dataclass
 class SourceOutcome:
     source: str
     ok: bool = True
@@ -56,6 +76,7 @@ class RunReport:
     wanted_problems: list[str] = field(default_factory=list)
     spooled: list[str] = field(default_factory=list)
     grid_ids: int = 0  # ids the grid supplied this run
+    enrich: EnrichResult | None = None
     grid_problems: list[str] = field(default_factory=list)
 
     @property
@@ -68,7 +89,7 @@ class RunReport:
 
     @property
     def clean(self) -> bool:
-        return not self.failed_sources and not self.stale_sources
+        return not self.failed_sources and not self.stale_sources and not (self.enrich and self.enrich.broken)
 
     def summary(self) -> str:
         if self.clean:
@@ -78,4 +99,6 @@ class RunReport:
             parts.append("failed: " + ", ".join(self.failed_sources))
         if self.stale_sources:
             parts.append("stale: " + ", ".join(self.stale_sources))
+        if self.enrich and self.enrich.broken:
+            parts.append("grid write failed")
         return "; ".join(parts)
