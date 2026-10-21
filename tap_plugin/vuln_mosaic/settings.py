@@ -37,10 +37,15 @@ class SourceSettings:
 DEFAULT_GRID_TYPES = ("compliance_core__compliance_vulnerability",)
 
 
+DEFAULT_MAX_NODES_PER_RUN = 2000
+
+
 @dataclass(frozen=True)
 class GridSettings:
     enabled: bool = True
     vulnerability_types: tuple[str, ...] = DEFAULT_GRID_TYPES
+    enrich: bool = True
+    max_nodes_per_run: int = DEFAULT_MAX_NODES_PER_RUN
 
 
 @dataclass(frozen=True)
@@ -80,6 +85,8 @@ def parse_settings(data: Mapping[str, Any]) -> Settings:
     grid = GridSettings(
         enabled=given_grid.get("enabled", True),
         vulnerability_types=tuple(given_grid.get("vulnerability_types", DEFAULT_GRID_TYPES)),
+        enrich=(given_grid.get("enrich") or {}).get("enabled", True),
+        max_nodes_per_run=(given_grid.get("enrich") or {}).get("max_nodes_per_run", DEFAULT_MAX_NODES_PER_RUN),
     )
     return Settings(
         sources=MappingProxyType(sources),

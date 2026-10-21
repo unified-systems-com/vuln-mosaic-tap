@@ -22,6 +22,19 @@ class GridRead:
 
 
 @dataclass
+class EnrichResult:
+    """What writing the facts back to the grid did: nodes patched, left alone, and a sentence per problem."""
+
+    patched: int = 0
+    unchanged: int = 0
+    skipped: int = 0  # nodes beyond max_nodes_per_run, left for the next run
+    failed: int = 0
+    lists_deferred: int = 0  # nodes whose list-valued facts (cwes) the grid's patch could not take
+    fields: int = 0
+    problems: list[str] = field(default_factory=list)
+
+
+@dataclass
 class SourceOutcome:
     source: str
     ok: bool = True
@@ -56,6 +69,7 @@ class RunReport:
     wanted_problems: list[str] = field(default_factory=list)
     spooled: list[str] = field(default_factory=list)
     grid_ids: int = 0  # ids the grid supplied this run
+    enrich: EnrichResult | None = None
     grid_problems: list[str] = field(default_factory=list)
 
     @property
