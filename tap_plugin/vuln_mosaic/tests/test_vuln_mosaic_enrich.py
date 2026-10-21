@@ -110,6 +110,17 @@ FACTS = {
 }  # fmt: skip
 
 
+def test_a_partly_filled_group_is_never_rolled_back_or_clobbered() -> None:  # enrich-3
+    newer_kev = {**EMPTY, "kev": None, "kev_catalog_version": "2027.01.01"}
+    assert not {k for k in plan_patch(newer_kev, FACTS) if k.startswith("kev")}, "stamped newer than our catalog"
+    sibling = {**EMPTY, "kev": None, "kev_added": "2021-12-10"}
+    assert not {k for k in plan_patch(sibling, FACTS) if k.startswith("kev")}, "part of a group, no stamp: another writer's"
+    newer_epss = {**EMPTY, "epss_score": None, "epss_date": "2027-01-01"}
+    assert not {k for k in plan_patch(newer_epss, FACTS) if k.startswith("epss")}
+    older_epss = {**EMPTY, "epss_score": None, "epss_date": "2026-01-01"}
+    assert plan_patch(older_epss, FACTS)["epss_score"] == 0.5, "stamped older: ours moves it forward"
+
+
 def test_an_unobserved_node_gets_everything(home) -> None:  # enrich-2
     assert plan_patch(EMPTY, FACTS) == FACTS
 
@@ -239,7 +250,8 @@ def test_a_node_with_only_a_list_fact_is_deferred_not_failed(home) -> None:  # e
 def test_the_per_run_bound_leaves_the_rest_for_the_next_run(home) -> None:  # enrich-6
     grid = Grid([_row(n) for n in range(1, 6)])
     out = run_write(grid, home, {"grid": {"enrich": {"max_nodes_per_run": 2}}})
-    assert (out.patched, out.skipped) == (2, 3)
+    assert (out.patched, out.stopped_early) == (2, True)
+    assert not run_write(Grid([_row(1)]), home).stopped_early
 
 
 def test_a_node_whose_id_is_not_an_id_is_never_looked_up(home) -> None:  # enrich-6
@@ -251,6 +263,33 @@ def test_a_node_whose_id_is_not_an_id_is_never_looked_up(home) -> None:  # enric
 
     out = run_write(Grid([_row(1, vuln_id="not an id"), _row(2, vuln_id="../etc")]), home, facts=facts)
     assert asked == [] and out.patched == 0 and not Grid([]).batches
+
+
+def test_unwritable_nodes_do_not_starve_the_ones_after_them(home) -> None:  # enrich-6
+    def facts(vuln_id, h):
+        # the first three nodes can only ever be given a list fact; the later ones can be given a title
+        return SimpleNamespace(values={"cwes": ["CWE-506"]} if vuln_id < "CVE-2026-00004" else {"title": "T"})
+
+    grid = Grid([_row(n) for n in range(1, 9)], list_bug=True)
+    out = run_write(grid, home, {"grid": {"enrich": {"max_nodes_per_run": 2}}}, facts=facts)
+    assert out.patched == 2 and out.lists_deferred == 3 and out.stopped_early, out
+    titled = [op.target for ops, _ in grid.batches for op in ops if op.payload == {"title": "T"}]
+    assert titled == ["eid-4", "eid-5"]
+
+
+def test_the_grid_is_read_lazily_not_all_at_once(home, monkeypatch) -> None:  # enrich-6
+    monkeypatch.setattr(gridwrite, "PAGE", 2)
+    pages: list[str] = []
+    grid = Grid([_row(n) for n in range(1, 9)])
+
+    def execute(query, inputs):
+        pages.append(inputs["after"])
+        return grid.execute(query, inputs)
+
+    out = gridwrite.enrich_grid(
+        parse_settings({"grid": {"enrich": {"max_nodes_per_run": 1}}}), home, execute=execute, batch=grid.batch, facts=_facts
+    )
+    assert out.patched == 1 and len(pages) == 1, "stopped at the bound without reading the rest of the grid"
 
 
 def test_a_node_with_no_version_is_not_written_blind(home) -> None:  # enrich-5
@@ -302,12 +341,19 @@ def test_the_write_can_be_switched_off(home, upstream, clock, grid) -> None:  # 
     assert calls == [] and report.enrich is None
 
 
-def test_a_failing_write_is_reported_and_never_fails_the_refresh(home, upstream, clock) -> None:  # enrich-7
+def test_a_write_phase_that_fails_outright_makes_the_run_not_clean(home, upstream, clock) -> None:  # enrich-7
     def boom(settings, h):
         raise RuntimeError("grid said no")
 
     report = _run(home, upstream, clock, boom)
-    assert report.clean and report.enrich.problems == ["grid write: RuntimeError: grid said no"]
+    assert report.enrich.problems == ["grid write: RuntimeError: grid said no"]
+    assert not report.clean and report.failed_sources == [] and "grid write failed" in report.summary()
+
+
+def test_one_refused_node_is_not_a_broken_write_phase() -> None:  # enrich-6
+    assert not EnrichResult(patched=4, failed=1).broken
+    assert not EnrichResult(lists_deferred=3).broken, "a known limit of the grid is a warning, not a failure"
+    assert EnrichResult(failed=2).broken and EnrichResult(raised=True).broken
 
 
 def test_no_writer_means_no_write(home, upstream, clock) -> None:

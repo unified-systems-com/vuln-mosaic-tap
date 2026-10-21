@@ -155,7 +155,7 @@ def _report_data(report: RunReport) -> dict[str, Any]:
                 "unchanged": report.enrich.unchanged,
                 "failed": report.enrich.failed,
                 "lists_deferred": report.enrich.lists_deferred,
-                "skipped": report.enrich.skipped,
+                "stopped_early": report.enrich.stopped_early,
                 "fields": report.enrich.fields,
             }
         ),

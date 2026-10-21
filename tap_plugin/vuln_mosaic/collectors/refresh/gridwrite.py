@@ -8,7 +8,7 @@ the nodes, calls it, and writes the result in small atomic batches.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -40,9 +40,8 @@ def _query(entity_type: str, limit: int) -> str:
     )
 
 
-def read_nodes(settings: Settings, execute: Execute, problems: list[str]) -> list[dict[str, Any]]:
-    """Every node of the configured types, with the fields enrichment may fill. A type that cannot be read is named."""
-    nodes: list[dict[str, Any]] = []
+def iter_nodes(settings: Settings, execute: Execute, problems: list[str]) -> Iterator[dict[str, Any]]:
+    """Nodes of the configured types, one page in memory at a time. A type that cannot be read is named."""
     scanned = 0
     for entity_type in settings.grid.vulnerability_types:
         after = ""
@@ -53,14 +52,13 @@ def read_nodes(settings: Settings, execute: Execute, problems: list[str]) -> lis
                 for row in rows:
                     if isinstance(row, dict) and isinstance(row.get("eid"), str) and isinstance(row.get("vuln_id"), str):
                         row["type"] = entity_type
-                        nodes.append(row)
+                        yield row
                 last = rows[-1].get("vuln_id") if rows and isinstance(rows[-1], dict) else None
                 if len(rows) < PAGE or not isinstance(last, str) or last <= after:
                     break
                 after = last
         except Exception as exc:
             problems.append(f"grid write: {entity_type}: {type(exc).__name__}: {str(exc)[:160]}")
-    return nodes
 
 
 def _error_text(result: Any) -> str:
@@ -121,24 +119,34 @@ def enrich_grid(
     if batch is None:
         from tap_grid.services import write_batch as batch
     out = EnrichResult()
-    pending: list[tuple[str, int, dict[str, Any]]] = []
-    for node in read_nodes(settings, execute, out.problems):
+    budget = settings.grid.max_nodes_per_run
+    attempt_cap = budget * 5  # nodes the grid keeps refusing must not make a run try the whole grid
+    attempted = 0
+    chunk: list[tuple[str, int, dict[str, Any]]] = []
+    for node in iter_nodes(settings, execute, out.problems):
         try:
             validate_vuln_id(node["vuln_id"])
         except ValueError:
             continue  # reported once by the id read; nothing is looked up for it
-        if len(pending) >= settings.grid.max_nodes_per_run:
-            out.skipped += 1
-            continue
         patch = plan_patch({name: node.get(name) for name in FIELDS}, facts(node["vuln_id"], home).values)
         if not patch:
             out.unchanged += 1
+            continue
+        if out.lists_deferred and patch.keys() <= LIST_FIELDS:
+            out.lists_deferred += 1  # only a list fact, and this grid has refused lists this run: not an attempt
             continue
         version = node.get("ver")
         if not isinstance(version, int):
             out.failed += 1
             continue
-        pending.append((node["eid"], version, patch))
-    for start in range(0, len(pending), CHUNK):
-        _write(pending[start : start + CHUNK], batch, out)
+        chunk.append((node["eid"], version, patch))
+        attempted += 1
+        if len(chunk) >= CHUNK or out.patched + len(chunk) >= budget:
+            _write(chunk, batch, out)
+            chunk = []
+        if out.patched >= budget or attempted >= attempt_cap:
+            out.stopped_early = True
+            break
+    if chunk:
+        _write(chunk, batch, out)
     return out

@@ -71,7 +71,7 @@ def _enrich_grid(settings: Settings, writer: Callable[[Settings, Path], EnrichRe
     try:
         report.enrich = writer(settings, root)
     except Exception as exc:  # the grid refusing a write must never turn a good refresh into a failed one
-        report.enrich = EnrichResult(problems=[f"grid write: {type(exc).__name__}: {exc}"[:300]])
+        report.enrich = EnrichResult(raised=True, problems=[f"grid write: {type(exc).__name__}: {exc}"[:300]])
 
 
 def _run_source(name: str, ctx: RunContext, report: RunReport, sleep: Callable[[float], None] | None) -> SourceOutcome:

@@ -182,6 +182,17 @@ def _newer(ours: object, theirs: object) -> bool:
     return isinstance(ours, str) and isinstance(theirs, str) and ours > theirs
 
 
+def _group_may_move(current: Mapping[str, Any], group: tuple[str, ...], stamp: str, ours: object) -> bool:
+    """A KEV or EPSS group is written when the node has none of it, or when ours is stamped newer than theirs.
+
+    A node with part of a group but no stamp is another writer's and is left, and a node stamped newer than
+    our dataset is never moved back, whatever else it lacks."""
+    theirs = current.get(stamp)
+    if theirs is not None:
+        return _newer(ours, theirs)
+    return all(current.get(name) is None for name in group)
+
+
 def plan_patch(current: Mapping[str, Any], facts: Mapping[str, Any]) -> dict[str, Any]:
     """The fields to write onto a node whose present values are ``current``; empty when there is nothing to add."""
     patch: dict[str, Any] = {}
@@ -192,19 +203,14 @@ def plan_patch(current: Mapping[str, Any], facts: Mapping[str, Any]) -> dict[str
             patch[name] = facts[name]
     if "cvss_score" in facts and all(current.get(name) is None for name in CVSS_GROUP):
         patch.update({name: facts[name] for name in CVSS_GROUP if name in facts})
-    if "kev" in facts and (
-        current.get("kev") is None
-        or _newer(facts.get("kev_catalog_version"), current.get("kev_catalog_version"))
-    ):
+    if "kev" in facts and _group_may_move(current, KEV_GROUP, "kev_catalog_version", facts.get("kev_catalog_version")):
         group = {name: facts[name] for name in KEV_GROUP if name in facts}
         if facts["kev"] is False:
             # No longer on the catalog: the details of an earlier listing are withdrawn with it.
             group.update({name: None for name in KEV_GROUP if name != "kev" and name not in group})
         if any(current.get(name) != value for name, value in group.items()):
             patch.update(group)
-    if "epss_score" in facts and (
-        current.get("epss_score") is None or _newer(facts.get("epss_date"), current.get("epss_date"))
-    ):
+    if "epss_score" in facts and _group_may_move(current, EPSS_GROUP, "epss_date", facts.get("epss_date")):
         group = {name: facts[name] for name in EPSS_GROUP if name in facts}
         if any(current.get(name) != value for name, value in group.items()):
             patch.update(group)
