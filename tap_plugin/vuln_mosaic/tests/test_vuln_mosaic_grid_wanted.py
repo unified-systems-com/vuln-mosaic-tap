@@ -130,6 +130,30 @@ def test_the_pager_stops_after_the_row_bound(monkeypatch) -> None:  # wanted-8
     assert any("scanning 4 rows" in p for p in read.problems) and read.ids == []
 
 
+def test_a_full_page_of_non_strings_is_named_not_silent() -> None:  # wanted-8
+    def execute(query, inputs):
+        return {"rows": [{"id": 1}] * gridread.PAGE}
+
+    read = gridread.read_grid_ids(parse_settings({}), execute)
+    assert read.ids == [] and any("held no string vuln_id" in p for p in read.problems)
+
+
+def test_the_row_bound_is_exact_across_types(monkeypatch) -> None:  # wanted-8
+    monkeypatch.setattr(gridread, "MAX_ROWS", 5)
+    monkeypatch.setattr(gridread, "PAGE", 4)
+    limits: list[int] = []
+
+    def execute(query, inputs):
+        limit = int(query.rsplit("LIMIT ", 1)[1])
+        limits.append(limit)
+        return {"rows": [{"id": f"CVE-2026-{len(limits):02d}{n:03d}"} for n in range(limit)]}
+
+    settings = parse_settings({"grid": {"vulnerability_types": ["a__one", "b__two"]}})
+    read = gridread.read_grid_ids(settings, execute)
+    assert sum(limits) == 5 and limits == [4, 1], limits
+    assert len(read.ids) == 5 and any("scanning 5 rows" in p for p in read.problems)
+
+
 def test_a_repeated_or_non_string_row_is_ignored() -> None:
     def execute(query, inputs):
         return {"rows": [{"id": "CVE-2022-0001"}, {"id": "CVE-2022-0001"}, {"id": 7}, {"other": 1}, "x"]}

@@ -21,11 +21,11 @@ MAX_ROWS = 1_000_000  # rows scanned per run, valid or not, so malformed values 
 Execute = Callable[..., dict[str, Any]]
 
 
-def _query(entity_type: str) -> str:
+def _query(entity_type: str, limit: int) -> str:
     # The slug is schema-checked in settings (lowercase, digits, underscores, one `__`); it is query text, not a command.
     return (
         f"MATCH (v:{entity_type}) WHERE v.data.vuln_id > $after "
-        "RETURN v.data.vuln_id AS id ORDER BY id ASC LIMIT " + str(PAGE)
+        "RETURN v.data.vuln_id AS id ORDER BY id ASC LIMIT " + str(limit)
     )
 
 
@@ -45,7 +45,8 @@ def read_grid_ids(settings: Settings, execute: Execute | None = None) -> GridRea
         after = ""
         try:
             while not stop:
-                rows = execute(_query(entity_type), {"after": after}).get("rows") or []
+                limit = min(PAGE, MAX_ROWS - scanned)
+                rows = execute(_query(entity_type, limit), {"after": after}).get("rows") or []
                 values = [r.get("id") for r in rows if isinstance(r, dict) and isinstance(r.get("id"), str)]
                 scanned += len(rows)
                 for value in values:
@@ -64,7 +65,9 @@ def read_grid_ids(settings: Settings, execute: Execute | None = None) -> GridRea
                         result.ids.append(value)
                 if scanned >= MAX_ROWS and not stop:
                     stop = f"grid: stopped after scanning {MAX_ROWS} rows"
-                if stop or len(rows) < PAGE or not values or values[-1] <= after:
+                if not values and len(rows) >= limit and not stop:
+                    result.problems.append(f"grid: {entity_type}: a full page held no string vuln_id; stopped reading it")
+                if stop or len(rows) < limit or not values or values[-1] <= after:
                     break
                 after = values[-1]
         except Exception as exc:  # a type that is not installed raises; the other types and the sources go on
