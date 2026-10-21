@@ -215,9 +215,9 @@ def plan_patch(current: Mapping[str, Any], facts: Mapping[str, Any]) -> dict[str
         patch.update({name: facts[name] for name in CVSS_GROUP if name in facts})
     if "kev" in facts and _group_may_move(current, KEV_GROUP, "kev_catalog_version", facts.get("kev_catalog_version"), _newer_version):
         group = {name: facts[name] for name in KEV_GROUP if name in facts}
-        if facts["kev"] is False:
-            # No longer on the catalog: the details of an earlier listing are withdrawn with it.
-            group.update({name: None for name in KEV_GROUP if name != "kev" and name not in group})
+        # The group is one observation of one catalog: a detail this catalog does not carry (a delisting,
+        # or a listing without a due date) is cleared, never left from an earlier catalog's entry.
+        group.update({name: None for name in KEV_GROUP if name != "kev" and name not in group and current.get(name) is not None})
         if any(current.get(name) != value for name, value in group.items()):
             patch.update(group)
     if all(name in facts for name in EPSS_GROUP) and _group_may_move(current, EPSS_GROUP, "epss_date", facts.get("epss_date")):

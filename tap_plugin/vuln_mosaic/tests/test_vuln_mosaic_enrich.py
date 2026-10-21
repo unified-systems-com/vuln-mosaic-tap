@@ -175,6 +175,13 @@ def test_delisting_withdraws_the_old_kev_details() -> None:  # enrich-3
     assert patch["kev_catalog_version"] == "2026.10.15"
 
 
+def test_a_newer_listing_without_a_detail_clears_the_old_one() -> None:  # enrich-3
+    held = {**EMPTY, "kev": True, "kev_catalog_version": "2026.09.01", "kev_due_date": "2020-02-01", "kev_required_action": "old"}
+    facts = {"kev": True, "kev_catalog_version": "2026.10.15", "kev_added": "2026-01-01"}
+    patch = plan_patch(held, facts)
+    assert patch["kev_due_date"] is None and patch["kev_required_action"] is None and patch["kev_added"] == "2026-01-01"
+
+
 def test_epss_is_rewritten_only_for_a_newer_day() -> None:  # enrich-3
     held = {**EMPTY, "epss_score": 0.1, "epss_percentile": 0.2, "epss_date": "2026-10-16"}
     assert not {k for k in plan_patch(held, FACTS) if k.startswith("epss")}, "same day: nothing to say"
