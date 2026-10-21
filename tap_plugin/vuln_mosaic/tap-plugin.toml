@@ -5,8 +5,11 @@ slug = "vuln_mosaic"
 name = "TAP Vuln Mosaic"
 description = "Local copies of public vulnerability data — CVE records, CISA KEV, EPSS, NVD and OSV — kept as files and SQLite stores so a running instance makes no lookups at use time. Collects only; it never scans, matches or writes findings."
 
-# No other plugin is imported or referenced (req-vuln-mosaic-wanted-4): consumers write a plain
-# file and call a read function, and this plugin knows nothing of their vocabulary.
+# No other plugin is imported (req-vuln-mosaic-wanted-4): consumers write a plain file or the
+# collector reads vulnerability ids off the grid, and a read function serves them. The one
+# vocabulary reference is an entity-type slug held as a setting string (grid.vulnerability_types,
+# default compliance_core__compliance_vulnerability, req-vuln-mosaic-wanted-7); a type that is not
+# installed is named in the run record and skipped, so this is not a dependency.
 depends_on = []
 
 # The author's DECLARED crypto posture (req-vuln-mosaic-fips). HTTPS and digests use the standard

@@ -90,7 +90,7 @@ def test_collector_lands_no_batch_and_fails_when_a_source_does(home, upstream, c
     seed_upstream(upstream)
     want(home, PUBLISHED_SSVC)
     report = run(home, upstream, clock, FakeOpener({KEV_URL: 503, EPSS_URL: (epss_body(), {})}))
-    monkeypatch.setattr(mod, "run_refresh", lambda: report)
+    monkeypatch.setattr(mod, "run_refresh", lambda **_: report)
     instance = mod.VulnMosaicRefreshCollector.__new__(mod.VulnMosaicRefreshCollector)
     instance.results = {"info": [], "warn": [], "error": []}
     instance._produced_batches, instance._surfaces, instance._surfaces_declared, instance.summary = [], [], False, ""

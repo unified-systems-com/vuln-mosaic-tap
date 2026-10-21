@@ -49,7 +49,7 @@ Three consequences shape v0:
 | req-vuln-mosaic-store | [The Stores](#the-stores) | Implemented | One SQLite file per record source, plain files for whole-file sources, in a directory the plugin owns |
 | req-vuln-mosaic-staleness | [Staleness Is Derived](#staleness-is-derived) | Implemented | As-of and checked-at per source; `stale` computed at read time against the limit |
 | req-vuln-mosaic-cvelist | [CVE Records From cvelistV5](#cve-records-from-cvelistv5) | Implemented | Blobless shallow git fetch; incremental by tree diff; REJECTED kept as state |
-| req-vuln-mosaic-wanted | [The Wanted-Ids Contract](#the-wanted-ids-contract) | Implemented | A file the consumer writes, a request spool, and the wanted and full modes |
+| req-vuln-mosaic-wanted | [The Wanted-Ids Contract](#the-wanted-ids-contract) | Implemented | The vulnerability ids on the grid, a file the consumer may write, a request spool, and the wanted and full modes |
 | req-vuln-mosaic-lookup | [The Read Function](#the-read-function) | Implemented | `get_cve`: record, not fetched or rejected; deferred by default, immediate by operator switch |
 | req-vuln-mosaic-records | [The Record Parser](#the-record-parser) | Implemented | `vuln_mosaic.records`: CVSS CNA-first, CWE, SSVC; stdlib only |
 | req-vuln-mosaic-integrity | [Integrity, Fail Closed](#integrity-fail-closed) | Implemented | Verify before apply; quarantine a malformed record; nothing upstream is signed |
@@ -194,10 +194,11 @@ RID: `req-vuln-mosaic-wanted`
 
 Status: `Implemented`
 
-Consumers tell the plugin which CVE ids matter by writing a plain file, and the plugin imports nothing from them. A request spool carries single ids asked for at read time. The default mode fetches only those ids; full mode, an operator switch, fetches everything.
+The plugin learns which CVE and GHSA ids matter by reading the vulnerability nodes already on the grid; a consumer may also write a plain file, and the plugin imports nothing from either. A request spool carries single ids asked for at read time. The default mode fetches only those ids; full mode, an operator switch, fetches everything.
 
 #### Implementation
 
+- **Grid path (default on):** at the start of a run the collector reads `v.data.vuln_id` from every node of each entity type in `settings.grid.vulnerability_types` (default `compliance_core__compliance_vulnerability`) through the grid's read path under the collector's own actor, paged by id, and adds each value that is exactly a CVE or GHSA id to the `wanted` table with origin `grid`. The read is read-only. The type slug is query text checked by the settings schema; the ids are untrusted text, validated by the same pattern as every other id, and never reach a command line. A type that is not installed, or a grid that cannot be read, is named in the run record and the sources refresh without it. `settings.grid.enabled = false` turns it off. The default slug names compliance_core's type as a string and nothing is imported from it (`req-vuln-mosaic-wanted-4`). The reader lives outside the Django-free refresh core and is handed in. Like the spool, ids it adds stay wanted (v0 does not prune).
 - **Batch path:** each consumer writes its own file `<home>/wanted/<consumer>.json`, one file per consumer so writers never race. `<consumer>` matches `^[a-z][a-z0-9_]{0,63}$` (a plugin slug); the collector ignores, and names in its run record, any file in `wanted/` whose name does not, and never builds a path from an unvalidated name. A `wanted/` entry that is a symlink is ignored and named; files are opened with `O_NOFOLLOW`. The file validates against `tap_plugin/vuln_mosaic/schemas/wanted.schema.json` (a top-level `description` string and an `ids` array of strings, each a CVE id matching `^CVE-[0-9]{4}-[0-9]{4,}$` or a GHSA id matching `^GHSA(-[2-9cfghjmpqrvwx]{4}){3}$`, each with a described property; `cvelist` reads the CVE ids and `ghsa` the GHSA ids, and each ignores the other kind). A file that fails validation is ignored for that run and named in the run's results; it never aborts the run.
 - **Spool path:** a read that misses (`req-vuln-mosaic-lookup`, `req-vuln-mosaic-ghsa-6`) creates `<home>/spool/<CVE-id or GHSA-id>` with `O_CREAT | O_EXCL`, so concurrent requests for one id are one file. The collector ingests each spool file into the `wanted` table of the store, fetches the record, and deletes the file. Ids added this way stay wanted and are refreshed with the rest; v0 does not prune the set (its size is bounded by the ids ever asked about).
 - **Wanted set** for a run is the union of every valid `wanted/*.json` file, the `wanted` table, and every id already held in the store. A record once stored is therefore refreshed on every run until the operator prunes it, so a consumer dropping an id from its file cannot leave an old copy reading as fresh. Pruning is an operator act and removes the row from `records` as well.
@@ -214,6 +215,8 @@ Consumers tell the plugin which CVE ids matter by writing a plain file, and the 
 | req-vuln-mosaic-wanted-4 | No Consumer Vocabulary | Implemented | The package imports no other plugin; a test fails if `tap_plugin.*` other than its own is imported. | |
 | req-vuln-mosaic-wanted-5 | Held Records Stay Fresh | Implemented | A record already stored is refreshed on a later run although no wanted file lists its id any more. | |
 | req-vuln-mosaic-wanted-6 | Consumer Name Validated | Implemented | A file named `../x.json` or `A B.json` in `wanted/`, or a symlink there pointing outside it, is ignored and named in the run record, and no path outside `wanted/` is opened. | |
+| req-vuln-mosaic-wanted-7 | Grid Ids Are Wanted | Implemented | A vulnerability id held on a grid node of a configured type is fetched on the next run with no wanted file, a GHSA id goes to the ghsa store and a CVE id to the cvelist store, and the grid is read in pages by id. | Ran against a real grid with compliance_core v0.8.5 (2026-10-21): five nodes read in order, also with a page size of 2. |
+| req-vuln-mosaic-wanted-8 | Grid Is Untrusted And Optional | Implemented | A grid value that is not exactly a CVE or GHSA id is refused and named, never stored; an unreadable grid or an uninstalled type is named and the sources still refresh; `grid.enabled = false` reads nothing; the refresh core imports neither Django nor tap_grid. | |
 
 ### The Read Function
 
@@ -322,7 +325,7 @@ One collector, `vuln_mosaic:refresh`, runs every enabled source on a seeded hour
 - **`run()`:** takes the writer lock, ingests the spool, then for each enabled source in a fixed order fetches, verifies (`req-vuln-mosaic-integrity`) and applies. One source failing never skips the rest. Each source's outcome is recorded with `record_info`, `record_warn` or `record_error` carrying the source, the `source_version`, counts and, on failure, the reason; the run `summary` names the sources that failed and those that are stale. `submit_grift` is never called, and `declare_no_surfaces()` says on the record that no listing surface was read. A run in which any source failed or is stale ends as a failed collection job naming each such source, never clean.
 - **`self_test`:** `<home>` is writable, the settings file validates, the `git` binary is present, and each enabled source's host is named; a reachability check is read-only.
 - **Gate (resolved):** the tap_cares task body accepts a run that lands zero batches. *Ran* 2026-10-19 in a dev stack: the collector fired through `fire_collector_and_await` ended `SUCCESSFUL` with its results and summary recorded and no batch.
-- **Actor:** the collector runs as the `tap_cares.collector` program actor that the task body binds (*read* in `tap_cares/tasks.py`) and writes no grid object itself; its only grid footprint is the job record.
+- **Actor:** the collector runs as the `tap_cares.collector` program actor that the task body binds (*read* in `tap_cares/tasks.py`) and writes no grid object itself; its grid footprint is the job record plus read-only queries for the vulnerability ids it should hold (`req-vuln-mosaic-wanted-7`).
 
 #### Acceptance Criteria
 
@@ -590,7 +593,7 @@ Things this plugin is not going to do, stated so a later change cannot grow into
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
-| req-vuln-mosaic-nongoals-1 | No Findings Written | Implemented | A full run writes no `finding`, `vulnerability` or other graph node; its only grid footprint is the collection job and the seeded schedule. | |
+| req-vuln-mosaic-nongoals-1 | No Findings Written | Implemented | A full run writes no `finding`, `vulnerability` or other graph node; its grid footprint is the collection job, the seeded schedule, and read-only queries for the vulnerability ids it should hold. | |
 | req-vuln-mosaic-nongoals-2 | No Pages Shipped | Implemented | The package ships no page, and the manifest declares no pages; its one panel type is registered in code. | |
 
 ### OSV Increments

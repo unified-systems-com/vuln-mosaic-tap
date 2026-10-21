@@ -6,6 +6,7 @@ import json
 import os
 import re
 import stat
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -120,6 +121,25 @@ def ingest_spool(home: Path, store: RecordStore, *, kind: str = "cve") -> list[s
         os.unlink(spool / name)
         taken.append(vuln_id)
     return taken
+
+
+def ingest_grid(store: RecordStore, ids: Iterable[str], *, kind: str = "cve") -> tuple[int, list[str]]:
+    """Add grid-supplied ids of ``kind`` to the ``wanted`` table; return (taken, bad values).
+
+    The grid is outside the trust boundary: a value that is not exactly a CVE or GHSA id is refused
+    and reported, never stored, and nothing here places an id on a command line."""
+    taken, bad = 0, []
+    for value in ids:
+        try:
+            vuln_id = validate_vuln_id(value)
+        except ValueError:
+            bad.append(repr(value)[:80])
+            continue
+        if bool(GHSA_ID_RE.fullmatch(vuln_id)) != (kind == "ghsa"):
+            continue
+        store.add_wanted(vuln_id, "grid")
+        taken += 1
+    return taken, bad[:20]
 
 
 def wanted_set(scan: WantedScan, store: RecordStore, *, kind: str = "cve") -> set[str]:

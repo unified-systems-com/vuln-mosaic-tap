@@ -14,6 +14,14 @@ from tap_plugin.vuln_mosaic.staleness import DatasetFacts
 
 
 @dataclass
+class GridRead:
+    """What reading the grid produced: the ids, and a plain sentence for each thing that went wrong."""
+
+    ids: list[str] = field(default_factory=list)
+    problems: list[str] = field(default_factory=list)
+
+
+@dataclass
 class SourceOutcome:
     source: str
     ok: bool = True
@@ -39,6 +47,7 @@ class RunContext:
     now: Callable[[], datetime]
     fetcher_factory: Callable[[frozenset[str]], Fetcher]
     git_factory: Callable[..., Git]  # (repo, home, remote=None); remote None is cvelistV5
+    grid_ids: tuple[str, ...] = ()  # vulnerability ids read from the grid for this run (req-vuln-mosaic-wanted-7)
 
 
 @dataclass
@@ -46,6 +55,8 @@ class RunReport:
     outcomes: list[SourceOutcome] = field(default_factory=list)
     wanted_problems: list[str] = field(default_factory=list)
     spooled: list[str] = field(default_factory=list)
+    grid_ids: int = 0  # ids the grid supplied this run
+    grid_problems: list[str] = field(default_factory=list)
 
     @property
     def failed_sources(self) -> list[str]:
