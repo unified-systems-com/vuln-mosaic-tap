@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -10,7 +11,7 @@ from typing import Any
 from tap_plugin.vuln_mosaic import files
 from tap_plugin.vuln_mosaic.home import resolve_home
 from tap_plugin.vuln_mosaic.advisories import ParsedAdvisory, extract_advisory
-from tap_plugin.vuln_mosaic.ids import validate_cve_id, validate_ghsa_id
+from tap_plugin.vuln_mosaic.ids import validate_cve_id, validate_ghsa_id, validate_mal_id
 from tap_plugin.vuln_mosaic.locking import LockBusy, writer_lock
 from tap_plugin.vuln_mosaic.settings import SettingsError, load_settings
 from tap_plugin.vuln_mosaic.staleness import DatasetFacts, is_stale
@@ -189,6 +190,70 @@ def _immediate_ghsa(root: Path, ghsa_id: str) -> GhsaResult | str:
     if record is None:  # pragma: no cover - just written
         return "stored record not readable"
     return _ghsa_result(record.state, record.raw, _info(facts, _max_age(root, "ghsa")))
+
+
+# ---------------------------------------------------------------------------------------------
+# OSV malicious-package advisories (req-vuln-mosaic-osv-mal)
+# ---------------------------------------------------------------------------------------------
+
+MAX_OSV_MEMBER_BYTES = 8 * 1024 * 1024  # one advisory; the zip check already bounds members at 64 MB
+
+
+@dataclass(frozen=True)
+class OsvResult:
+    """``state`` is ``found``, ``withdrawn`` or ``not-fetched``.
+
+    ``not-fetched`` means no held ecosystem zip contains the id; it never means the advisory does not exist.
+    ``ecosystem`` names the held zip the advisory was read from; ``malware`` is True for a ``MAL-`` id.
+    """
+
+    state: str
+    advisory: ParsedAdvisory | None
+    dataset: DatasetInfo
+    ecosystem: str | None = None
+    malware: bool = False
+    reason: str | None = None
+
+
+def _held_osv_ecosystems(root: Path) -> list[str]:
+    try:
+        base = files.source_dir(root, "osv")
+        return sorted(e.name for e in base.iterdir() if e.is_dir() and not e.name.startswith("."))
+    except OSError:
+        return []
+
+
+def get_osv(osv_id: str, *, home: Path | None = None) -> OsvResult:
+    """Read a malicious-package advisory (``MAL-YYYY-N``) from the OSV ecosystem zips this plugin holds.
+
+    Raises ``ValueError`` for a malformed id before any I/O. A pure read: nothing is queued or fetched,
+    because OSV is held as whole ecosystem zips (the operator opts ecosystems in; ``req-vuln-mosaic-osv-1``).
+    The member is found by name in the zip's directory, so the cost is one lookup per held ecosystem."""
+    validate_mal_id(osv_id)
+    root = resolve_home(home)
+    age = _max_age(root, "osv")
+    held = _held_osv_ecosystems(root)
+    name = f"{osv_id}.json"
+    for eco in held:
+        try:
+            handle = files.open_current(root, f"osv/{eco}", "all.zip")
+        except (FileNotFoundError, ValueError):
+            continue
+        with handle:
+            try:
+                with zipfile.ZipFile(handle) as archive:
+                    with archive.open(archive.getinfo(name)) as member:
+                        body = member.read(MAX_OSV_MEMBER_BYTES + 1)  # a larger member is cut and fails to parse
+                    record = json.loads(body)
+            except (KeyError, zipfile.BadZipFile, ValueError, OSError):
+                continue  # not in this zip, or this zip is unreadable: the next ecosystem may hold it
+        if not isinstance(record, dict) or record.get("id") != osv_id:
+            continue
+        advisory = extract_advisory(record)
+        info_ = _info(files.read_facts(root, f"osv/{eco}"), age)
+        return OsvResult(WITHDRAWN if advisory.withdrawn else FOUND, advisory, info_, eco, True)
+    reason = "no OSV ecosystem is held" if not held else f"not in the {len(held)} held OSV ecosystem(s)"
+    return OsvResult(NOT_FETCHED, None, DatasetInfo(None, None, None, None), None, True, reason)
 
 
 # ---------------------------------------------------------------------------------------------

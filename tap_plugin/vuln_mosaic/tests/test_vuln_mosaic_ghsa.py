@@ -285,10 +285,14 @@ def test_held_advisory_makes_its_alias_wanted_by_cvelist(home, adb, clock) -> No
 
 # --- the read function ---------------------------------------------------------------------------
 
-def test_get_ghsa_found_with_scored_cvss_and_aliases(home, adb, clock) -> None:  # ghsa-6
+def test_get_ghsa_found_with_scored_cvss_and_aliases(home, adb, clock, monkeypatch) -> None:  # ghsa-6
+    from tap_plugin.vuln_mosaic import lookup, staleness
+
     seed(adb)
     want(home, TOCTOU)
     run(home, adb, clock)
+    # The read judges staleness against the real clock; hold it at the run's clock so the test does not age out.
+    monkeypatch.setattr(lookup, "is_stale", lambda checked_at, days: staleness.is_stale(checked_at, days, clock()))
     result = get_ghsa(TOCTOU, home=home, queue=False)
     assert result.state == FOUND and result.advisory.cve_ids == ("CVE-2026-86805",)
     assert result.advisory.best_cvss.base_score == 6.3

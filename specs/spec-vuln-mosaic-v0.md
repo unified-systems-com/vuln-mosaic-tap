@@ -58,6 +58,7 @@ Three consequences shape v0:
 | req-vuln-mosaic-epss | [FIRST EPSS Scores](#first-epss-scores) | Implemented | Whole-file source; keeps the model version and score date |
 | req-vuln-mosaic-nvd | [NVD API 2.0](#nvd-api-20) | Proposed | By CVE id and by last-modified window for wanted ids; gated on terms and limits not yet read |
 | req-vuln-mosaic-osv | [OSV, Per Ecosystem](#osv-per-ecosystem) | Implemented | Opt-in per ecosystem; whole zip swapped; the large ecosystems named |
+| req-vuln-mosaic-osv-mal | [OSV Malicious Packages](#osv-malicious-packages) | Implemented | `get_osv` reads a `MAL-` advisory from the held ecosystem zips; `MAL-` ids are accepted from the grid and enriched with CWE-506 |
 | req-vuln-mosaic-ghsa | [GitHub Security Advisories](#github-security-advisories) | Implemented | GHSA ids to their CVE aliases, with a CVSS v3 base score computed from the vector; off by default; no mirror yet |
 | req-vuln-mosaic-mirror | [The Operator Mirror](#the-operator-mirror) | Implemented | No-egress fallback: an artifact copy plus a sha256 manifest, verified before use |
 | req-vuln-mosaic-fips | [FIPS Declaration](#fips-declaration) | Implemented | `[fips]` table; stdlib crypto uses the image's OpenSSL; git's TLS path to be verified |
@@ -67,6 +68,7 @@ Three consequences shape v0:
 | req-vuln-mosaic-enrich | [Enriching Vulnerability Nodes](#enriching-vulnerability-nodes) | Implemented | After the sources refresh, fills unobserved facts on existing vulnerability nodes from the local copies; patches only; never overwrites |
 | req-vuln-mosaic-nongoals | [Non-Goals](#non-goals) | Implemented | No scanning, matching or findings; no records as nodes; no pages in v0 |
 | req-vuln-mosaic-osv-incremental | [OSV Increments](#osv-increments) | Backlog | Apply OSV's modified-id list instead of swapping whole zips |
+| req-vuln-mosaic-nvd-pacing | [NVD Pacing And Attribution](#nvd-pacing-and-attribution) | Backlog | Two-hour spacing between NVD refreshes and the NVD notice when NVD data is shown; gates enabling NVD |
 | req-vuln-mosaic-data-home | [A Platform Data Directory](#a-platform-data-directory) | Backlog | A core convention for operator data directories, deferred |
 | req-vuln-mosaic-status-panel | [A Dataset Status Panel](#a-dataset-status-panel) | Backlog | A page or panel showing each source's age and last outcome |
 | req-vuln-mosaic-grift-bridge | [Records As Graph Nodes](#records-as-graph-nodes) | Backlog | The default ruling is no; recorded so the question has a home |
@@ -422,6 +424,31 @@ URL `https://osv-vulnerabilities.storage.googleapis.com/<ecosystem>/all.zip` (ec
 | req-vuln-mosaic-osv-2 | Whole Zip Swapped | Implemented | A new zip becomes `current` only after validation; an unchanged one advances `checked_at`. | |
 | req-vuln-mosaic-osv-3 | Disk Budget Stated | Implemented | The settings documentation states the two-build cost of each enabled ecosystem and names Wolfi, Chainguard and Ubuntu as the largest. | |
 
+### OSV Malicious Packages
+
+----
+RID: `req-vuln-mosaic-osv-mal`
+
+Status: `Implemented`
+
+OSV's `MAL-YYYY-N` advisories (OpenSSF malicious-packages) name a package as malicious. They sit in the per-ecosystem zips this plugin already holds (`req-vuln-mosaic-osv`), so reading one needs no new download, no new store and no wanted table. This requirement adds the id, a read function and the enrichment of a grid node that carries such an id; it fetches nothing and creates no node.
+
+#### Implementation
+
+`ids.MAL_ID_RE` accepts exactly `MAL-` followed by a four-digit year, a dash and one to nine digits; `validate_vuln_id` accepts it beside CVE and GHSA ids, and `ids.id_kind` names the kind (`cve`, `ghsa`, `osv`) so each wanted table takes only its own ids. A `MAL-` id from the grid or the spool is therefore never added to the cvelist or ghsa wanted tables and is not reported as a problem.
+
+`lookup.get_osv(osv_id, home=None)` looks the member `<id>.json` up by name in the `current` zip of every held `osv/<ecosystem>` directory, reads at most 8 MB of it, parses it with the advisory parser already used for GHSA (OSV format), and returns `found`, `withdrawn` or `not-fetched` with the ecosystem it came from and that ecosystem's dataset times and staleness. The member's own `id` must equal the requested id. It is a pure read: nothing is queued or fetched. `not-fetched` means no held zip has it, never that the advisory does not exist.
+
+The enrichment (`req-vuln-mosaic-enrich`) fills a `MAL-` node from the advisory: title, description, published and updated times, `record_url` `https://osv.dev/vulnerability/<id>`, and `cwes`. OSV malicious-package records carry no CWE; `CWE-506` (Embedded Malicious Code) is this plugin's mapping for the kind, used only when the record lists none. It is written only to a node whose `cwes` is unobserved. *Not observed:* a real OSV ecosystem zip holding `MAL-` records; the tests build zips of the documented shape.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-vuln-mosaic-osv-mal-1 | The Id | Implemented | A `MAL-YYYY-N` id validates; anything else (a lowercase prefix, a trailing newline, a path, another OSV prefix) is refused; a `MAL-` id is never taken into the cvelist or ghsa wanted tables. | |
+| req-vuln-mosaic-osv-mal-2 | Read From Held Zips | Implemented | `get_osv` returns the advisory from whichever held ecosystem zip has it, marks a withdrawn one withdrawn, returns not-fetched for a miss, skips a broken zip or member, bounds the member read and queues nothing. | |
+| req-vuln-mosaic-osv-mal-3 | Enrich With CWE-506 | Implemented | A node with a `MAL-` id is filled from the advisory with `CWE-506` as its `cwes` when the record lists none; a withdrawn or unheld advisory adds nothing; a `cwes` the node already has is kept. | |
+
 ### GitHub Security Advisories
 
 ----
@@ -597,7 +624,7 @@ Scanners and collectors put a vulnerability on the grid with whatever they happe
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
-| req-vuln-mosaic-enrich-1 | Facts From Local Datasets | Implemented | For a CVE id the facts come from the held record, KEV and EPSS; for a GHSA id from the held advisory; nothing held means no facts. | |
+| req-vuln-mosaic-enrich-1 | Facts From Local Datasets | Implemented | For a CVE id the facts come from the held record, KEV and EPSS; for a GHSA id from the held advisory; for a `MAL-` id from the held OSV advisory (`req-vuln-mosaic-osv-mal`); nothing held means no facts. | |
 | req-vuln-mosaic-enrich-2 | Fill, Never Overwrite | Implemented | A fact the node already has is not written, an empty list counts as held, and the CVSS fields are written whole or not at all. | Mutation-checked: breaking the rule fails four tests. |
 | req-vuln-mosaic-enrich-3 | Volatile Facts Only Move Forward | Implemented | KEV is rewritten only for a newer catalog version (compared as dotted integers, as the KEV refresh does) and EPSS only for a newer score date, a group is filled only when none of it is held, a node stamped newer is never moved back, a delisting clears the details, and a stale or unchecked dataset contributes nothing. | |
 | req-vuln-mosaic-enrich-4 | Withdrawn And Rejected Add Nothing | Implemented | A withdrawn advisory and a rejected record produce no facts. | |
@@ -636,6 +663,15 @@ RID: `req-vuln-mosaic-osv-incremental`
 Status: `Backlog`
 
 Apply OSV's per-ecosystem `modified_id.csv` (lines of `timestamp,id`, newest first, *observed* 2026-10-16) as increments to a stored ecosystem instead of swapping the whole zip. Blocked on deciding the stored shape for OSV records (the v0 form is the zip as received).
+
+### NVD Pacing And Attribution
+
+----
+RID: `req-vuln-mosaic-nvd-pacing`
+
+Status: `Backlog`
+
+Two things NVD's documentation asks for that the NVD source does not yet do, read from NVD's own pages on 2026-10-21. Pacing: after the first load, update with last-modified windows "no more than once every two hours"; the seeded refresh runs hourly and the NVD source has no spacing of its own (it does pace requests at one per 6.5 seconds). Attribution: a service that uses the API shows "This product uses data from the NVD API but is not endorsed or certified by the NVD." prominently; no panel shows NVD data today, only a link, so the notice is due the day NVD data is shown. Enabling NVD is gated on the first; the second on the first panel that shows NVD data. Not read: the documented ceiling on the date-window size (the spec's 120 days still comes from client libraries). Backlogged by the maintainer on 2026-10-30.
 
 ### A Platform Data Directory
 
