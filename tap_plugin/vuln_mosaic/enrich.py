@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from tap_plugin.vuln_mosaic.advisories import ParsedAdvisory
-from tap_plugin.vuln_mosaic.ids import CVE_ID_RE, GHSA_ID_RE
+from tap_plugin.vuln_mosaic.ids import CVE_ID_RE, GHSA_ID_RE, MAL_ID_RE
 from tap_plugin.vuln_mosaic.integrity import version_tuple
 from tap_plugin.vuln_mosaic.lookup import (
     FOUND,
@@ -35,6 +35,7 @@ from tap_plugin.vuln_mosaic.lookup import (
     get_epss,
     get_ghsa,
     get_kev,
+    get_osv,
 )
 from tap_plugin.vuln_mosaic.records import CvssMetric, extract_record
 
@@ -163,6 +164,25 @@ def _advisory_facts(ghsa_id: str, home: Path | None, facts: Facts) -> None:
     facts.values.update({k: v for k, v in values.items() if v is not None})
 
 
+MALWARE_CWE = "CWE-506"  # Embedded Malicious Code: OSV's MAL- records carry no CWE; this is our mapping for the kind
+
+
+def _osv_facts(osv_id: str, home: Path | None, facts: Facts) -> None:
+    result = get_osv(osv_id, home=home)
+    advisory = result.advisory
+    if result.state != FOUND or advisory is None:
+        return  # not held, or withdrawn: a withdrawn advisory is not presented as live
+    values: dict[str, Any] = {
+        "title": _clip(advisory.summary),
+        "description": _clip(advisory.details),
+        "published_at": _clip(advisory.published),
+        "record_updated_at": _clip(advisory.modified),
+        "record_url": f"https://osv.dev/vulnerability/{osv_id}",
+        "cwes": list(advisory.cwe_ids) or [MALWARE_CWE],
+    }
+    facts.values.update({k: v for k, v in values.items() if v is not None})
+
+
 def facts_for(vuln_id: str, home: Path | None = None) -> Facts:
     """Everything the local datasets hold about ``vuln_id`` that a node could carry. Reads, never writes."""
     facts = Facts()
@@ -172,6 +192,8 @@ def facts_for(vuln_id: str, home: Path | None = None) -> Facts:
         _epss_facts(vuln_id, home, facts)
     elif GHSA_ID_RE.fullmatch(vuln_id):
         _advisory_facts(vuln_id, home, facts)
+    elif MAL_ID_RE.fullmatch(vuln_id):
+        _osv_facts(vuln_id, home, facts)
     return facts
 
 

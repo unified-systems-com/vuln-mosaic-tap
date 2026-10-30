@@ -30,11 +30,37 @@ def validate_ghsa_id(value: object) -> str:
     return value
 
 
+# OSV's id for a malicious package (OpenSSF malicious-packages), e.g. MAL-2023-1234. Only this prefix of
+# the OSV id space is accepted: other OSV ids (PYSEC-, RUSTSEC-, ...) are not what a grid vulnerability
+# node is keyed by here.
+MAL_ID_PATTERN = r"^MAL-[0-9]{4}-[0-9]{1,9}$"
+MAL_ID_RE = re.compile(MAL_ID_PATTERN)
+
+
+def validate_mal_id(value: object) -> str:
+    """Return ``value`` if it is a well-formed OSV malicious-package id, else raise ``ValueError``."""
+    if not isinstance(value, str) or not MAL_ID_RE.fullmatch(value):
+        raise ValueError("not a MAL id")
+    return value
+
+
 def validate_vuln_id(value: object) -> str:
-    """A CVE id or a GHSA id; anything else raises ``ValueError``."""
-    if isinstance(value, str) and (CVE_ID_RE.fullmatch(value) or GHSA_ID_RE.fullmatch(value)):
+    """A CVE id, a GHSA id or an OSV malicious-package id; anything else raises ``ValueError``."""
+    if isinstance(value, str) and (CVE_ID_RE.fullmatch(value) or GHSA_ID_RE.fullmatch(value) or MAL_ID_RE.fullmatch(value)):
         return value
-    raise ValueError("not a CVE or GHSA id")
+    raise ValueError("not a CVE, GHSA or MAL id")
+
+
+def id_kind(value: str) -> str | None:
+    """``cve``, ``ghsa`` or ``osv`` for a well-formed id, else ``None``. ``osv`` ids have no wanted table:
+    OSV is held as whole ecosystem zips, so nothing is fetched per id."""
+    if CVE_ID_RE.fullmatch(value):
+        return "cve"
+    if GHSA_ID_RE.fullmatch(value):
+        return "ghsa"
+    if MAL_ID_RE.fullmatch(value):
+        return "osv"
+    return None
 
 
 def record_path(cve_id: str) -> str:

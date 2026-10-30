@@ -12,7 +12,7 @@ from pathlib import Path
 
 import jsonschema
 
-from tap_plugin.vuln_mosaic.ids import GHSA_ID_RE, validate_vuln_id
+from tap_plugin.vuln_mosaic.ids import GHSA_ID_RE, id_kind, validate_vuln_id
 from tap_plugin.vuln_mosaic.settings import load_schema
 from tap_plugin.vuln_mosaic.store import RecordStore
 
@@ -115,7 +115,7 @@ def ingest_spool(home: Path, store: RecordStore, *, kind: str = "cve") -> list[s
             vuln_id = validate_vuln_id(name)
         except ValueError:
             continue
-        if bool(GHSA_ID_RE.fullmatch(vuln_id)) != (kind == "ghsa"):
+        if id_kind(vuln_id) != kind:
             continue
         store.add_wanted(vuln_id, "spool")
         os.unlink(spool / name)
@@ -140,9 +140,9 @@ def ingest_grid(store: RecordStore, ids: Iterable[str], *, kind: str = "cve") ->
             vuln_id = validate_vuln_id(value)
         except ValueError:
             if len(problems) < 20:
-                problems.append(f"grid: not a CVE or GHSA id: {value!r:.80}")
+                problems.append(f"grid: not a CVE, GHSA or MAL id: {value!r:.80}")
             continue
-        if bool(GHSA_ID_RE.fullmatch(vuln_id)) != (kind == "ghsa"):
+        if id_kind(vuln_id) != kind:
             continue
         if store.is_wanted(vuln_id):
             continue

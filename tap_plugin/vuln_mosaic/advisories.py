@@ -95,7 +95,8 @@ def _packages(value: object) -> tuple[AdvisoryPackage, ...]:
         introduced: list[str] = []
         fixed: list[str] = []
         for rng in entry.get("ranges") if isinstance(entry.get("ranges"), list) else []:
-            for event in rng.get("events", []) if isinstance(rng, dict) else []:
+            events = rng.get("events") if isinstance(rng, dict) else None
+            for event in events if isinstance(events, list) else []:
                 if not isinstance(event, dict):
                     continue
                 if isinstance(event.get("introduced"), str):
