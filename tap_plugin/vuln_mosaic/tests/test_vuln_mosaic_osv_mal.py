@@ -197,3 +197,22 @@ def test_a_cwe_list_the_node_already_has_is_not_replaced(home) -> None:
     assert "cwes" in plan_patch({"cwes": None}, facts)
     assert "cwes" not in plan_patch({"cwes": ["CWE-1104"]}, facts)
     assert "cwes" not in plan_patch({"cwes": []}, facts)  # observed-empty is an observation
+
+
+@pytest.mark.spec("req-vuln-mosaic-osv-mal-2")
+@pytest.mark.parametrize(
+    "junk",
+    [
+        {"affected": 1},
+        {"affected": [1, None, {"package": 5, "ranges": "x"}, {"package": {}, "ranges": [1, {"events": 7}]}]},
+        {"aliases": 5, "references": "x", "severity": "high", "database_specific": [1], "summary": 9, "published": []},
+        {"references": [1, {"url": 3}], "severity": [{"type": "CVSS_V3", "score": 5}, 4], "withdrawn": 0},
+    ],
+)
+def test_a_malformed_member_never_stops_the_search(home, junk) -> None:
+    """The first ecosystem holds a member with the right id and nonsense fields; the next holds a good one."""
+    hold(home, "Alpine", {f"{MAL}.json": mal_record(**junk)})
+    hold(home, "PyPI", {f"{MAL}.json": mal_record()})
+    got = get_osv(MAL, home=home)  # must not raise
+    assert got.state in (FOUND, WITHDRAWN)
+    facts_for(MAL, home)  # nor may the enrichment's read of it

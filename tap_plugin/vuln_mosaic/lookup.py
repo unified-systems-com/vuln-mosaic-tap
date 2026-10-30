@@ -249,7 +249,10 @@ def get_osv(osv_id: str, *, home: Path | None = None) -> OsvResult:
                 continue  # not in this zip, or this zip is unreadable: the next ecosystem may hold it
         if not isinstance(record, dict) or record.get("id") != osv_id:
             continue
-        advisory = extract_advisory(record)
+        try:
+            advisory = extract_advisory(record)
+        except (TypeError, ValueError, AttributeError, KeyError):
+            continue  # upstream data of an unexpected shape costs this member, not the search
         info_ = _info(files.read_facts(root, f"osv/{eco}"), age)
         return OsvResult(WITHDRAWN if advisory.withdrawn else FOUND, advisory, info_, eco, True)
     reason = "no OSV ecosystem is held" if not held else f"not in the {len(held)} held OSV ecosystem(s)"
