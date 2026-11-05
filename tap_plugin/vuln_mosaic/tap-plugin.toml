@@ -1,6 +1,6 @@
 manifest_version = "0"
 plugin_version = "v0.7.0" # x-release-please-version
-requires_tap = ">=0.3.0"
+requires_tap = ">=0.3.1"
 slug = "vuln_mosaic"
 name = "TAP Vuln Mosaic"
 description = "Local copies of public vulnerability data — CVE records, CISA KEV, EPSS, NVD and OSV — kept as files and SQLite stores so a running instance makes no lookups at use time. Collects only; it never scans, matches or writes findings."
