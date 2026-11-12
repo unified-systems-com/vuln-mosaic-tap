@@ -149,6 +149,16 @@ def test_a_broken_zip_or_member_is_skipped_not_raised(home) -> None:
 
 
 @pytest.mark.spec("req-vuln-mosaic-osv-mal-2")
+def test_a_member_that_is_not_valid_utf8_is_skipped_not_raised(home) -> None:
+    """``json.loads`` on undecodable bytes raises UnicodeDecodeError, a ValueError, which ``get_osv`` already
+    treats as a member it cannot read (an AI review of PR 19 asked whether it escapes; this pins that it does not)."""
+    hold(home, "Alpine", {f"{MAL}.json": b"\xff\xfe not utf-8 \x80"})
+    hold(home, "PyPI", {f"{MAL}.json": mal_record()})
+    got = get_osv(MAL, home=home)  # must not raise, and must reach the valid ecosystem
+    assert got.state == FOUND and got.ecosystem == "PyPI"
+
+
+@pytest.mark.spec("req-vuln-mosaic-osv-mal-2")
 def test_an_oversize_member_is_not_read(home, monkeypatch) -> None:
     from tap_plugin.vuln_mosaic import lookup
 
