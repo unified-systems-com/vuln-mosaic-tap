@@ -48,7 +48,7 @@ def test_a_value_that_is_not_an_id_is_refused_and_reported(home, upstream, clock
     assert report.clean
     with RecordStore.open_writer(home, "cvelist") as writer:
         assert writer.wanted_ids() == {PUBLISHED_SSVC}
-    assert len(report.grid_problems) == len(bad) - 0 and all("not a CVE or GHSA id" in p for p in report.grid_problems)
+    assert len(report.grid_problems) == len(bad) - 0 and all("not a CVE, GHSA or MAL id" in p for p in report.grid_problems)
 
 
 def test_an_unreadable_grid_never_stops_the_sources(home, upstream, clock) -> None:  # wanted-8
