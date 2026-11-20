@@ -25,6 +25,6 @@ jobs:
     permissions:
       contents: read
       security-events: write
-    uses: unified-systems-com/tap/.github/workflows/plugin-ci.yml@2b4424e8424c66e9dfa67134ab6141c2049ae952
+    uses: unified-systems-com/tap/.github/workflows/plugin-ci.yml@c3b64dffca512afa852f588560f774e2b357b655
     with:
       plugin_slug: vuln_mosaic
