@@ -1,6 +1,12 @@
 {
   "metadata": {
-    "grift_version": "0"
+    "grift_version": "1",
+    "spine_version": 1,
+    "type_versions": {
+      "SCHEDULED_TARGET": 1,
+      "batch": 1,
+      "schedule": 1
+    }
   },
   "_reserved": {},
   "batches": [
