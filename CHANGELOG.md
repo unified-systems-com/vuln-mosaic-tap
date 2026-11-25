@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.3](https://github.com/unified-systems-com/vuln-mosaic-tap/compare/v0.7.2...v0.7.3) (2026-11-25)
+
+
+### Bug Fixes
+
+* raise requires_tap to 0.4.9 (GRIFT format "1" documents) ([6a424df](https://github.com/unified-systems-com/vuln-mosaic-tap/commit/6a424df15c08cb974f8e0b4b2da83185cf287c07))
+* raise requires_tap to 0.4.9 (GRIFT format "1" documents) ([6930898](https://github.com/unified-systems-com/vuln-mosaic-tap/commit/693089866ff57721843ca3aa08362b08ee0d8262))
+
 ## [0.7.2](https://github.com/unified-systems-com/vuln-mosaic-tap/compare/v0.7.1...v0.7.2) (2026-11-25)
 
 
