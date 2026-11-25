@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/unified-systems-com/vuln-mosaic-tap/compare/v0.7.1...v0.7.2) (2026-11-25)
+
+
+### Miscellaneous Chores
+
+* release 0.7.2 ([7a29b10](https://github.com/unified-systems-com/vuln-mosaic-tap/commit/7a29b1039b411c90a4f9cade462eb88e7bd5a9e4))
+
 ## [0.7.1](https://github.com/unified-systems-com/vuln-mosaic-tap/compare/v0.7.0...v0.7.1) (2026-11-19)
 
 
