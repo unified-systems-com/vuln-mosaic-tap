@@ -27,6 +27,6 @@ jobs:
       security-events: write
     # Pinned to tap v0.4.9 (86f9d918), the manifest floor: its GRIFT schema reads format "1"
     # headers. Renovate does not track this pin; move it with the floor.
-    uses: unified-systems-com/tap/.github/workflows/plugin-ci.yml@86f9d918ad5ac2cce52225d3c5a4dd0596aab68e
+    uses: unified-systems-com/tap/.github/workflows/plugin-ci.yml@21e4e525af68f90e294030f43d74c4abaac7c36f
     with:
       plugin_slug: vuln_mosaic
