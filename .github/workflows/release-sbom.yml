@@ -24,6 +24,6 @@ jobs:
       contents: read
       id-token: write
       attestations: write
-    uses: unified-systems-com/tap/.github/workflows/plugin-release-sbom.yml@c3b64dffca512afa852f588560f774e2b357b655 # core main 2026-10-19 — pinned like ci.yml: the release/attestation lane must not ride a mutable ref
+    uses: unified-systems-com/tap/.github/workflows/plugin-release-sbom.yml@21e4e525af68f90e294030f43d74c4abaac7c36f # core main 2026-10-19 — pinned like ci.yml: the release/attestation lane must not ride a mutable ref
     with:
       plugin_slug: vuln_mosaic
