@@ -1,6 +1,6 @@
 manifest_version = "0"
 plugin_version = "0.7.3" # x-release-please-version
-requires_tap = ">=0.4.9"  # GRIFT format "1" headers (spine_version, type_versions) are refused by the 0.3.1 schema; 0.4.9 is the floor for the fleet wave
+requires_tap = ">=0.5.0"  # GRIFT format "1" headers (spine_version, type_versions) are refused by the 0.3.1 schema; 0.4.9 is the floor for the fleet wave
 slug = "vuln_mosaic"
 name = "TAP Vuln Mosaic"
 description = "Local copies of public vulnerability data — CVE records, CISA KEV, EPSS, NVD and OSV — kept as files and SQLite stores so a running instance makes no lookups at use time. Collects only; it never scans, matches or writes findings."
